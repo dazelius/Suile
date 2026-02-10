@@ -3,17 +3,18 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { Lock, Unlock, QrCode } from "lucide-react";
+import { Lock, Unlock, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { decodeLetterData, QrLetterData } from "@/lib/qr-data";
-import { siteConfig } from "@/config/site";
 import { AdSlot } from "@/components/ads/AdSlot";
+import { useI18n } from "@/components/i18n/I18nProvider";
 
 interface LetterViewProps {
   encoded: string;
 }
 
 export function LetterView({ encoded }: LetterViewProps) {
+  const { t } = useI18n();
   const [letterData, setLetterData] = useState<QrLetterData | null>(null);
   const [isOpened, setIsOpened] = useState(false);
   const [error, setError] = useState(false);
@@ -33,13 +34,13 @@ export function LetterView({ encoded }: LetterViewProps) {
         <div className="w-14 h-14 rounded-2xl bg-zinc-200 flex items-center justify-center">
           <Lock className="h-6 w-6 text-zinc-400" />
         </div>
-        <p className="text-lg font-semibold">메시지를 찾을 수 없습니다</p>
+        <p className="text-lg font-semibold">{t("msgNotFound")}</p>
         <p className="text-muted-foreground text-sm text-center">
-          잘못된 QR코드이거나 링크가 손상되었습니다.
+          {t("msgNotFoundDesc")}
         </p>
         <Link href="/">
           <Button variant="outline" className="h-12 px-6 text-base">
-            홈으로 돌아가기
+            {t("msgGoHome")}
           </Button>
         </Link>
       </div>
@@ -55,7 +56,7 @@ export function LetterView({ encoded }: LetterViewProps) {
   }
 
   const hasTo = letterData.to && letterData.to.length > 0;
-  const hasFrom = letterData.from && letterData.from !== "익명";
+  const hasFrom = letterData.from && letterData.from !== t("anonymous");
 
   return (
     <div className="min-h-dvh bg-zinc-50 flex flex-col items-center justify-center px-5 py-12 safe-area-inset">
@@ -86,21 +87,21 @@ export function LetterView({ encoded }: LetterViewProps) {
 
             <div className="text-center space-y-2">
               <p className="text-xl font-bold text-zinc-900">
-                비밀 메시지가 도착했어요
+                {t("msgArrived")}
               </p>
               {hasTo && (
                 <p className="text-sm text-zinc-500">
-                  {letterData.to}님에게 온 메시지
+                  {t("msgArrivedTo", { name: letterData.to })}
                 </p>
               )}
               {hasFrom && !hasTo && (
                 <p className="text-sm text-zinc-500">
-                  {letterData.from}님이 보낸 메시지
+                  {t("msgArrivedFrom", { name: letterData.from })}
                 </p>
               )}
               {!hasFrom && !hasTo && (
                 <p className="text-sm text-zinc-500">
-                  누군가 보낸 비밀 메시지
+                  {t("msgArrivedAnon")}
                 </p>
               )}
             </div>
@@ -112,12 +113,12 @@ export function LetterView({ encoded }: LetterViewProps) {
                 className="w-full h-14 text-base gap-2 rounded-2xl bg-zinc-900 hover:bg-zinc-800 shadow-lg active:shadow-md transition-shadow"
               >
                 <Unlock className="h-5 w-5" />
-                메시지 열기
+                {t("msgOpen")}
               </Button>
             </motion.div>
 
             <p className="text-[11px] text-zinc-400">
-              QR코드를 스캔하면 이 페이지가 열려요
+              {t("msgScanHint")}
             </p>
           </motion.div>
         ) : (
@@ -132,7 +133,7 @@ export function LetterView({ encoded }: LetterViewProps) {
               <div className="flex items-center gap-2 px-5 py-3 border-b border-zinc-100 bg-zinc-50/50">
                 <Unlock className="h-3.5 w-3.5 text-green-500" />
                 <span className="text-xs text-zinc-500 font-medium">
-                  비밀 메시지가 공개되었습니다
+                  {t("msgOpened")}
                 </span>
               </div>
 
@@ -181,12 +182,12 @@ export function LetterView({ encoded }: LetterViewProps) {
                   variant="outline"
                   className="gap-2 rounded-full h-12 px-6 text-sm active:scale-95 transition-transform"
                 >
-                  <QrCode className="h-4 w-4" />
-                  나도 비밀 메시지 보내기
+                  <MessageCircle className="h-4 w-4" />
+                  {t("msgSendToo")}
                 </Button>
               </Link>
               <p className="mt-3 text-[11px] text-zinc-400">
-                {siteConfig.name} - QR 비밀 메시지
+                {t("siteName")}
               </p>
 
               <div className="mt-6">

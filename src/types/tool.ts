@@ -6,12 +6,15 @@ export type ToolCategory =
   | "converter"
   | "generator"
   | "lifestyle"
-  | "developer";
+  | "developer"
+  | "finance";
 
 export interface ToolConfig {
   id: string;
   name: string;
+  nameKey?: string; // i18n key
   description: string;
+  descriptionKey?: string; // i18n key
   category: ToolCategory;
   icon: string; // lucide-react icon name
   path: string;
@@ -23,6 +26,7 @@ export interface ToolConfig {
 export interface CategoryConfig {
   id: ToolCategory;
   name: string;
+  nameKey?: string; // i18n key
   icon: string;
   description: string;
 }

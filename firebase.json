@@ -14,6 +14,66 @@
         "source": "/ogImage",
         "function": "ogImage",
         "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/stockSearch",
+        "function": "stockSearch",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/stockHistory",
+        "function": "stockHistory",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/stockBattle",
+        "function": "stockBattle",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/sb",
+        "function": "stockBattleView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/stockBattleOg",
+        "function": "stockBattleOg",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/mc",
+        "function": "monteCarloView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/monteCarloOg",
+        "function": "monteCarloOg",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/pegHistory",
+        "function": "pegHistory",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/aptSearch",
+        "function": "aptSearch",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/aptBattle",
+        "function": "aptBattle",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/ab",
+        "function": "aptBattleView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/aptBattleOg",
+        "function": "aptBattleOg",
+        "region": "asia-northeast3"
       }
     ],
     "headers": [

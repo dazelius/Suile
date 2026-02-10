@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { siteConfig } from "@/config/site";
 import { LayoutShell } from "@/components/layout/LayoutShell";
+import { I18nProvider } from "@/components/i18n/I18nProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,14 +17,15 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: siteConfig.name,
+    default: `${siteConfig.name} - 블라인드 메시지 | Blind Message`,
     template: `%s | ${siteConfig.name}`,
   },
   description: siteConfig.description,
   keywords: siteConfig.keywords,
   openGraph: {
-    title: siteConfig.name,
-    description: siteConfig.description,
+    title: `${siteConfig.name} - 블라인드 메시지`,
+    description:
+      "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있는 블라인드 메시지 서비스.",
     url: siteConfig.url,
     siteName: siteConfig.name,
     locale: "ko_KR",
@@ -33,14 +35,15 @@ export const metadata: Metadata = {
         url: `${siteConfig.url}/og-qr.png`,
         width: 800,
         height: 800,
-        alt: "SUILE - QR 비밀 메시지",
+        alt: "SUILE - 블라인드 메시지",
       },
     ],
   },
   twitter: {
     card: "summary",
-    title: siteConfig.name,
-    description: siteConfig.description,
+    title: `${siteConfig.name} - 블라인드 메시지`,
+    description:
+      "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있는 블라인드 메시지 서비스.",
     images: [`${siteConfig.url}/og-qr.png`],
   },
   robots: {
@@ -64,7 +67,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#ffffff" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        {/* Google AdSense - 정적 HTML에 직접 포함되어야 크롤러가 인식 */}
+        {/* Google AdSense */}
         <script
           async
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1349078633848665"
@@ -74,7 +77,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased overscroll-none`}
       >
-        <LayoutShell>{children}</LayoutShell>
+        <I18nProvider>
+          <LayoutShell>{children}</LayoutShell>
+        </I18nProvider>
       </body>
     </html>
   );

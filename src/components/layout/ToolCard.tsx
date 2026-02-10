@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   QrCode,
@@ -9,13 +11,18 @@ import {
   Heart,
   Code,
   MessageCircle,
+  Lock,
+  TrendingUp,
+  Building2,
   ChevronRight,
   LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ToolConfig } from "@/types/tool";
+import { useI18n } from "@/components/i18n/I18nProvider";
+import type { Translations } from "@/lib/i18n";
 
-// 아이콘 매핑 - 새 아이콘 사용 시 여기에 추가
+// 아이콘 매핑
 const iconMap: Record<string, LucideIcon> = {
   QrCode,
   Type,
@@ -26,6 +33,9 @@ const iconMap: Record<string, LucideIcon> = {
   Heart,
   Code,
   MessageCircle,
+  Lock,
+  TrendingUp,
+  Building2,
 };
 
 interface ToolCardProps {
@@ -33,7 +43,15 @@ interface ToolCardProps {
 }
 
 export function ToolCard({ tool }: ToolCardProps) {
+  const { t } = useI18n();
   const Icon = iconMap[tool.icon] || Wand2;
+
+  const name = tool.nameKey
+    ? t(tool.nameKey as keyof Translations)
+    : tool.name;
+  const description = tool.descriptionKey
+    ? t(tool.descriptionKey as keyof Translations)
+    : tool.description;
 
   return (
     <Link href={tool.path} className="group block">
@@ -47,21 +65,21 @@ export function ToolCard({ tool }: ToolCardProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <h3 className="font-medium text-sm sm:text-base truncate">
-              {tool.name}
+              {name}
             </h3>
             {tool.isNew && (
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
-                NEW
+                {t("badgeNew")}
               </Badge>
             )}
             {tool.isPopular && (
               <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-orange-100 text-orange-700 hover:bg-orange-100">
-                인기
+                {t("badgePopular")}
               </Badge>
             )}
           </div>
           <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground line-clamp-1">
-            {tool.description}
+            {description}
           </p>
         </div>
 

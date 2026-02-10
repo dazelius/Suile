@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, Home } from "lucide-react";
 import { getToolByPath, getCategoryById } from "@/config/tools";
+import { useI18n } from "@/components/i18n/I18nProvider";
+import type { Translations } from "@/lib/i18n";
 
 interface BreadcrumbItem {
   label: string;
@@ -12,7 +14,8 @@ interface BreadcrumbItem {
 
 export function Breadcrumb() {
   const pathname = usePathname();
-  const items: BreadcrumbItem[] = buildBreadcrumb(pathname);
+  const { t } = useI18n();
+  const items: BreadcrumbItem[] = buildBreadcrumb(pathname, t);
 
   if (items.length === 0) return null;
 
@@ -25,7 +28,7 @@ export function Breadcrumb() {
             className="flex items-center gap-1 hover:text-foreground active:text-foreground transition-colors py-1"
           >
             <Home className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">홈</span>
+            <span className="hidden sm:inline">{t("breadcrumbHome")}</span>
           </Link>
         </li>
 
@@ -51,7 +54,10 @@ export function Breadcrumb() {
   );
 }
 
-function buildBreadcrumb(pathname: string): BreadcrumbItem[] {
+function buildBreadcrumb(
+  pathname: string,
+  t: (key: keyof Translations, params?: Record<string, string>) => string
+): BreadcrumbItem[] {
   const items: BreadcrumbItem[] = [];
 
   if (pathname.startsWith("/tools/")) {
@@ -61,11 +67,17 @@ function buildBreadcrumb(pathname: string): BreadcrumbItem[] {
       const category = getCategoryById(tool.category);
       if (category) {
         items.push({
-          label: category.name,
+          label: category.nameKey
+            ? t(category.nameKey as keyof Translations)
+            : category.name,
           href: `/?category=${category.id}`,
         });
       }
-      items.push({ label: tool.name });
+      items.push({
+        label: tool.nameKey
+          ? t(tool.nameKey as keyof Translations)
+          : tool.name,
+      });
     }
   }
 

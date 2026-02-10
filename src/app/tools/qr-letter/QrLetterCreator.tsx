@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import QRCode from "qrcode";
 import { RotateCcw, Eye, Lock, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,16 +9,18 @@ import { encodeLetterData, QrLetterData } from "@/lib/qr-data";
 import { generateQrCard } from "@/lib/qr-card";
 import { AdSlot } from "@/components/ads/AdSlot";
 import { ShareButtons } from "@/components/share/ShareButtons";
+import { useI18n } from "@/components/i18n/I18nProvider";
 
 const MAX_MESSAGE_LENGTH = 300;
 
-/** 현재 브라우저 origin 반환 (localhost, 배포 도메인 자동 대응) */
+/** 현재 브라우저 origin 반환 */
 function getOrigin() {
   if (typeof window !== "undefined") return window.location.origin;
   return "";
 }
 
 export function QrLetterCreator() {
+  const { t } = useI18n();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [message, setMessage] = useState("");
@@ -32,7 +33,7 @@ export function QrLetterCreator() {
   const generateQR = useCallback(async () => {
     if (!isValid) return;
 
-    const trimmedFrom = from.trim() || "익명";
+    const trimmedFrom = from.trim() || t("anonymous");
     const trimmedTo = to.trim() || "";
 
     const data: QrLetterData = {
@@ -43,33 +44,23 @@ export function QrLetterCreator() {
     };
 
     const encoded = encodeLetterData(data);
-    // /v 경로 = Cloud Function이 동적 OG meta를 삽입 후 /m으로 리다이렉트
     const url = `${getOrigin()}/v?d=${encoded}`;
     setLetterUrl(url);
 
     try {
-      // 1. QR코드 생성
-      const qrDataUrl = await QRCode.toDataURL(url, {
-        width: 512,
-        margin: 2,
-        color: { dark: "#18181b", light: "#FFFFFF" },
-        errorCorrectionLevel: "M",
-      });
-
-      // 2. 카드 이미지 생성 (QR + 브랜딩 + 문구)
       const card = await generateQrCard({
-        qrDataUrl,
         from: trimmedFrom,
         to: trimmedTo,
+        message: message.trim(),
       });
       setCardDataUrl(card);
 
       setStep("result");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      console.error("QR 생성 실패:", err);
+      console.error("카드 생성 실패:", err);
     }
-  }, [from, to, message, isValid]);
+  }, [from, to, message, isValid, t]);
 
   const reset = () => {
     setFrom("");
@@ -94,19 +85,17 @@ export function QrLetterCreator() {
             <Lock className="h-6 w-6" />
           </div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
-            QR 비밀 메시지
+            {t("toolQrTitle")}
           </h1>
-          <p className="mt-1.5 text-sm text-muted-foreground max-w-xs mx-auto">
-            QR코드 안에 비밀 메시지를 숨겨보세요.
-            <br />
-            스캔한 사람만 읽을 수 있어요.
+          <p className="mt-1.5 text-sm text-muted-foreground max-w-xs mx-auto whitespace-pre-line">
+            {t("toolQrSubtitle")}
           </p>
         </div>
 
         {/* 메시지 입력 */}
         <div className="space-y-1.5">
           <Textarea
-            placeholder="비밀 메시지를 입력하세요..."
+            placeholder={t("toolQrPlaceholder")}
             value={message}
             onChange={(e) => {
               if (e.target.value.length <= MAX_MESSAGE_LENGTH) {
@@ -117,20 +106,23 @@ export function QrLetterCreator() {
             className="resize-none text-base leading-relaxed border-2 focus:border-zinc-400"
           />
           <p className="text-xs text-muted-foreground text-right">
-            {message.length}/{MAX_MESSAGE_LENGTH}자
+            {t("toolQrCharCount", {
+              current: String(message.length),
+              max: String(MAX_MESSAGE_LENGTH),
+            })}
           </p>
         </div>
 
         {/* 보내는/받는 사람 (선택) */}
         <details className="group">
           <summary className="text-sm text-muted-foreground cursor-pointer select-none py-1 hover:text-foreground transition-colors">
-            보내는 사람 / 받는 사람 설정 (선택)
+            {t("toolQrSenderReceiverToggle")}
           </summary>
           <div className="grid grid-cols-2 gap-3 mt-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">보내는 사람</label>
+              <label className="text-sm font-medium">{t("toolQrSenderLabel")}</label>
               <Input
-                placeholder="익명"
+                placeholder={t("toolQrSenderPlaceholder")}
                 value={from}
                 onChange={(e) => setFrom(e.target.value)}
                 maxLength={20}
@@ -138,9 +130,9 @@ export function QrLetterCreator() {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">받는 사람</label>
+              <label className="text-sm font-medium">{t("toolQrReceiverLabel")}</label>
               <Input
-                placeholder="선택사항"
+                placeholder={t("toolQrReceiverPlaceholder")}
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
                 maxLength={20}
@@ -159,33 +151,33 @@ export function QrLetterCreator() {
             size="lg"
           >
             <Send className="h-4 w-4" />
-            비밀 메시지 만들기
+            {t("toolQrCreateBtn")}
           </Button>
         </div>
 
         {/* 설명 */}
         <div className="rounded-xl border bg-muted/30 p-4">
-          <h2 className="text-sm font-semibold mb-3">어떻게 사용하나요?</h2>
+          <h2 className="text-sm font-semibold mb-3">{t("toolQrHowTo")}</h2>
           <div className="grid grid-cols-3 gap-3 text-center">
             <div className="space-y-1.5">
               <div className="text-2xl">✍️</div>
-              <p className="text-xs font-medium">메시지 작성</p>
+              <p className="text-xs font-medium">{t("toolQrStep1Title")}</p>
               <p className="text-[11px] text-muted-foreground">
-                비밀 메시지를 입력
+                {t("toolQrStep1Desc")}
               </p>
             </div>
             <div className="space-y-1.5">
               <div className="text-2xl">🔗</div>
-              <p className="text-xs font-medium">카드 공유</p>
+              <p className="text-xs font-medium">{t("toolQrStep2Title")}</p>
               <p className="text-[11px] text-muted-foreground">
-                카톡·SNS로 전송
+                {t("toolQrStep2Desc")}
               </p>
             </div>
             <div className="space-y-1.5">
               <div className="text-2xl">🔓</div>
-              <p className="text-xs font-medium">메시지 확인</p>
+              <p className="text-xs font-medium">{t("toolQrStep3Title")}</p>
               <p className="text-[11px] text-muted-foreground">
-                링크 또는 QR 스캔
+                {t("toolQrStep3Desc")}
               </p>
             </div>
           </div>
@@ -194,18 +186,10 @@ export function QrLetterCreator() {
         {/* SEO 설명 */}
         <section className="space-y-3 text-sm text-muted-foreground">
           <h2 className="text-base font-semibold text-foreground">
-            QR 비밀 메시지란?
+            {t("toolQrSeoTitle")}
           </h2>
-          <p>
-            QR 비밀 메시지는 QR코드 또는 링크로 비밀 메시지를 보내는
-            서비스입니다. 카카오톡, 인스타그램 등 메신저로 링크를 보내거나,
-            QR코드를 인쇄하여 카드에 붙일 수 있습니다.
-          </p>
-          <p>
-            생일 축하, 사랑 고백, 감사 인사, 응원의 말을 비밀 메시지로
-            전해보세요. 받는 사람이 열어보는 순간 특별한 감동을 전할 수
-            있습니다.
-          </p>
+          <p>{t("toolQrSeoDesc1")}</p>
+          <p>{t("toolQrSeoDesc2")}</p>
         </section>
       </div>
     );
@@ -220,26 +204,24 @@ export function QrLetterCreator() {
           <Lock className="h-6 w-6" />
         </div>
         <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
-          비밀 메시지 완성!
+          {t("toolQrResultTitle")}
         </h1>
         <p className="mt-1.5 text-sm text-muted-foreground">
-          카드 이미지를 공유해보세요.
+          {t("toolQrResultSubtitle")}
         </p>
       </div>
 
-      {/* ========== 카드 공유 ========== */}
+      {/* 카드 공유 */}
       <div className="rounded-xl border-2 border-zinc-200 bg-zinc-50 p-4">
         {letterUrl && (
           <ShareButtons
             url={letterUrl}
-            title="비밀 메시지가 도착했어요"
-            description="누군가 당신에게 비밀 메시지를 보냈어요. 열어보세요!"
             cardDataUrl={cardDataUrl}
           />
         )}
       </div>
 
-      {/* ========== 미리보기 + 새로 만들기 ========== */}
+      {/* 미리보기 + 새로 만들기 */}
       <div className="flex gap-2">
         {previewUrl && (
           <Button
@@ -249,7 +231,7 @@ export function QrLetterCreator() {
           >
             <a href={previewUrl} target="_blank" rel="noopener noreferrer">
               <Eye className="h-4 w-4" />
-              미리보기
+              {t("toolQrPreview")}
             </a>
           </Button>
         )}
@@ -259,7 +241,7 @@ export function QrLetterCreator() {
           className="flex-1 h-11 gap-2 text-sm"
         >
           <RotateCcw className="h-4 w-4" />
-          새로 만들기
+          {t("toolQrNewMessage")}
         </Button>
       </div>
 
@@ -268,23 +250,23 @@ export function QrLetterCreator() {
 
       {/* 활용 팁 */}
       <div className="rounded-xl border bg-muted/30 p-4 sm:p-5">
-        <h2 className="text-sm font-semibold mb-3">이런 곳에 활용해보세요</h2>
+        <h2 className="text-sm font-semibold mb-3">{t("toolQrUseTip")}</h2>
         <div className="grid grid-cols-2 gap-3 text-center">
           <div className="rounded-lg bg-background p-3 space-y-1">
             <div className="text-xl">💬</div>
-            <p className="text-xs font-medium">카톡 · 메신저</p>
+            <p className="text-xs font-medium">{t("toolQrUseChat")}</p>
           </div>
           <div className="rounded-lg bg-background p-3 space-y-1">
             <div className="text-xl">📸</div>
-            <p className="text-xs font-medium">인스타 · SNS</p>
+            <p className="text-xs font-medium">{t("toolQrUseSns")}</p>
           </div>
           <div className="rounded-lg bg-background p-3 space-y-1">
             <div className="text-xl">💌</div>
-            <p className="text-xs font-medium">카드 · 편지</p>
+            <p className="text-xs font-medium">{t("toolQrUseLetter")}</p>
           </div>
           <div className="rounded-lg bg-background p-3 space-y-1">
             <div className="text-xl">🎁</div>
-            <p className="text-xs font-medium">선물 포장</p>
+            <p className="text-xs font-medium">{t("toolQrUseGift")}</p>
           </div>
         </div>
       </div>
