@@ -1,7 +1,7 @@
 export const siteConfig = {
   name: "SUILE",
   description: "SUILE - 무료 온라인 도구 모음. QR편지, 계산기, 변환기 등 유용한 도구를 한 곳에서",
-  url: "https://suile-47f74.web.app", // Firebase Hosting 도메인
+  url: "https://suile-21173.web.app", // Firebase Hosting 도메인
   ogImage: "/og.png",
   creator: "SUILE",
   keywords: [
