@@ -17,14 +17,16 @@ interface AdSlotProps {
   className?: string;
 }
 
+const AD_CLIENT = "ca-pub-1349078633848665";
+
 /**
  * 애드센스 광고 슬롯 컴포넌트
  *
- * - 승인 전: 자동 광고(Auto Ads)가 구글이 알아서 배치
- * - 승인 후: slot prop에 슬롯 ID 넣으면 수동 배치도 가능
+ * - slot 없이 사용: 자동 광고(Auto Ads) 단위 표시
+ * - slot 있으면: 해당 슬롯 ID 수동 배치
  *
  * 사용법:
- *   <AdSlot />                          ← 자동 광고용 자리 확보
+ *   <AdSlot />                          ← 자동 광고
  *   <AdSlot slot="1234567890" />         ← 특정 슬롯 수동 배치
  */
 export function AdSlot({
@@ -36,7 +38,7 @@ export function AdSlot({
   const pushed = useRef(false);
 
   useEffect(() => {
-    if (pushed.current || !slot) return;
+    if (pushed.current) return;
 
     try {
       (window.adsbygoogle = window.adsbygoogle || []).push({});
@@ -44,18 +46,7 @@ export function AdSlot({
     } catch {
       // 애드센스 아직 로드 안 됐거나 개발 환경
     }
-  }, [slot]);
-
-  // 슬롯 ID가 없으면 자동 광고가 알아서 이 영역 근처에 배치
-  // 빈 div로 공간만 확보 (자동 광고 힌트 역할)
-  if (!slot) {
-    return (
-      <div
-        className={`ad-slot w-full min-h-[50px] ${className}`}
-        data-ad-status="auto"
-      />
-    );
-  }
+  }, []);
 
   return (
     <div className={`ad-slot w-full overflow-hidden ${className}`}>
@@ -63,8 +54,8 @@ export function AdSlot({
         ref={adRef}
         className="adsbygoogle"
         style={{ display: "block" }}
-        data-ad-client="ca-pub-1349078633848665"
-        data-ad-slot={slot}
+        data-ad-client={AD_CLIENT}
+        {...(slot ? { "data-ad-slot": slot } : {})}
         data-ad-format={format}
         data-full-width-responsive="true"
       />
