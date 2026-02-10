@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { encodeLetterData, QrLetterData } from "@/lib/qr-data";
+import { generateQrCard } from "@/lib/qr-card";
 import { AdSlot } from "@/components/ads/AdSlot";
 import { ShareButtons } from "@/components/share/ShareButtons";
 
@@ -22,7 +23,7 @@ export function QrLetterCreator() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [message, setMessage] = useState("");
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [cardDataUrl, setCardDataUrl] = useState<string | null>(null);
   const [letterUrl, setLetterUrl] = useState<string | null>(null);
   const [step, setStep] = useState<"write" | "result">("write");
 
@@ -31,9 +32,12 @@ export function QrLetterCreator() {
   const generateQR = useCallback(async () => {
     if (!isValid) return;
 
+    const trimmedFrom = from.trim() || "익명";
+    const trimmedTo = to.trim() || "";
+
     const data: QrLetterData = {
-      from: from.trim() || "익명",
-      to: to.trim() || "",
+      from: trimmedFrom,
+      to: trimmedTo,
       message: message.trim(),
       theme: "secret",
     };
@@ -43,13 +47,22 @@ export function QrLetterCreator() {
     setLetterUrl(url);
 
     try {
-      const dataUrl = await QRCode.toDataURL(url, {
+      // 1. QR코드 생성
+      const qrDataUrl = await QRCode.toDataURL(url, {
         width: 512,
         margin: 2,
         color: { dark: "#18181b", light: "#FFFFFF" },
         errorCorrectionLevel: "M",
       });
-      setQrDataUrl(dataUrl);
+
+      // 2. 카드 이미지 생성 (QR + 브랜딩 + 문구)
+      const card = await generateQrCard({
+        qrDataUrl,
+        from: trimmedFrom,
+        to: trimmedTo,
+      });
+      setCardDataUrl(card);
+
       setStep("result");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
@@ -61,7 +74,7 @@ export function QrLetterCreator() {
     setFrom("");
     setTo("");
     setMessage("");
-    setQrDataUrl(null);
+    setCardDataUrl(null);
     setLetterUrl(null);
     setStep("write");
   };
@@ -162,7 +175,7 @@ export function QrLetterCreator() {
             </div>
             <div className="space-y-1.5">
               <div className="text-2xl">🔗</div>
-              <p className="text-xs font-medium">링크 공유</p>
+              <p className="text-xs font-medium">카드 공유</p>
               <p className="text-[11px] text-muted-foreground">
                 카톡·SNS로 전송
               </p>
@@ -209,23 +222,23 @@ export function QrLetterCreator() {
           비밀 메시지 완성!
         </h1>
         <p className="mt-1.5 text-sm text-muted-foreground">
-          링크를 보내거나 QR코드를 공유해보세요.
+          카드 이미지를 공유해보세요.
         </p>
       </div>
 
-      {/* ========== 1. QR코드 + 공유하기 ========== */}
+      {/* ========== 카드 공유 ========== */}
       <div className="rounded-xl border-2 border-zinc-200 bg-zinc-50 p-4">
         {letterUrl && (
           <ShareButtons
             url={letterUrl}
             title="비밀 메시지가 도착했어요"
             description="누군가 당신에게 비밀 메시지를 보냈어요. 열어보세요!"
-            qrDataUrl={qrDataUrl}
+            cardDataUrl={cardDataUrl}
           />
         )}
       </div>
 
-      {/* ========== 2. 미리보기 + 새로 만들기 ========== */}
+      {/* ========== 미리보기 + 새로 만들기 ========== */}
       <div className="flex gap-2">
         {previewUrl && (
           <Button
