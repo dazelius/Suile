@@ -2,16 +2,18 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Swords, Share2, Loader2, Building2, Trophy, ArrowRight } from "lucide-react";
+import { Swords, Share2, Loader2, Building2, Trophy, ArrowRight, Dice5, ChevronDown } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { AptSearch, AptSelection } from "./AptSearch";
 import { AptBattleChart } from "./AptBattleChart";
 import { AptBattleAnimation } from "./AptBattleAnimation";
-import { getFullRegionName } from "./region-codes";
+import { getSidoList, getSigunguList, getFullRegionName } from "./region-codes";
 import { useSearchParams } from "next/navigation";
 
 const APT_BATTLE_URL =
   "https://asia-northeast3-suile-21173.cloudfunctions.net/aptBattle";
+const APT_SEARCH_URL =
+  "https://asia-northeast3-suile-21173.cloudfunctions.net/aptSearch";
 const SITE_URL = "https://suile-21173.web.app";
 
 interface PricePoint {
@@ -33,25 +35,6 @@ interface BattleResult {
 type Phase = "input" | "loading" | "animating" | "result";
 
 const YEAR_OPTIONS = [3, 5, 10];
-
-// 빠른 비교 프리셋
-const PRESETS = [
-  {
-    label: "🏙️ 강남 빅매치",
-    a: { lawdCd: "11680", name: "은마", area: 76, dong: "대치동", regionName: "서울 강남구" },
-    b: { lawdCd: "11650", name: "래미안퍼스티지", area: 84, dong: "반포동", regionName: "서울 서초구" },
-  },
-  {
-    label: "🌉 한강뷰 대결",
-    a: { lawdCd: "11650", name: "반포자이", area: 84, dong: "반포동", regionName: "서울 서초구" },
-    b: { lawdCd: "11650", name: "아크로리버파크", area: 84, dong: "반포동", regionName: "서울 서초구" },
-  },
-  {
-    label: "🏢 송파 vs 강남",
-    a: { lawdCd: "11710", name: "잠실엘스", area: 84, dong: "잠실동", regionName: "서울 송파구" },
-    b: { lawdCd: "11680", name: "래미안대치팰리스", area: 84, dong: "대치동", regionName: "서울 강남구" },
-  },
-];
 
 export default function AptBattleClient() {
   const { t } = useI18n();
@@ -87,6 +70,54 @@ export default function AptBattleClient() {
   const [phase, setPhase] = useState<Phase>("input");
   const [result, setResult] = useState<BattleResult | null>(null);
   const [error, setError] = useState("");
+
+  // 랜덤 매칭
+  const [randomSido, setRandomSido] = useState("");
+  const [randomCode, setRandomCode] = useState("");
+  const [isRandomLoading, setIsRandomLoading] = useState(false);
+
+  const sidoList = getSidoList();
+  const sigunguList = randomSido ? getSigunguList(randomSido) : [];
+
+  const handleRandomMatch = useCallback(async () => {
+    if (!randomCode) return;
+    setIsRandomLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${APT_SEARCH_URL}?lawdCd=${randomCode}&q=`);
+      if (!res.ok) throw new Error("검색 실패");
+      const data = await res.json();
+      const list = (data.results || []).filter(
+        (r: any) => r.txCount >= 2 // 거래 2건 이상만
+      );
+      if (list.length < 2) {
+        throw new Error("해당 지역에 비교할 아파트가 부족합니다. 다른 지역을 선택해주세요.");
+      }
+      // 랜덤 2개 뽑기 (중복 방지)
+      const shuffled = [...list].sort(() => Math.random() - 0.5);
+      const regionName = getFullRegionName(randomCode);
+      const pickA = shuffled[0];
+      const pickB = shuffled[1];
+      setAptA({
+        lawdCd: randomCode,
+        name: pickA.name,
+        area: pickA.area,
+        dong: pickA.dong,
+        regionName,
+      });
+      setAptB({
+        lawdCd: randomCode,
+        name: pickB.name,
+        area: pickB.area,
+        dong: pickB.dong,
+        regionName,
+      });
+    } catch (err: any) {
+      setError(err.message || "랜덤 매칭 실패");
+    } finally {
+      setIsRandomLoading(false);
+    }
+  }, [randomCode]);
 
   // 배틀 시작
   const startBattle = useCallback(
@@ -153,6 +184,15 @@ export default function AptBattleClient() {
   };
 
   // 결과 계산
+  const fmtPrice = (manwon: number) => {
+    if (manwon >= 10000) {
+      const eok = Math.floor(manwon / 10000);
+      const rest = manwon % 10000;
+      return rest > 0 ? `${eok}억 ${Math.round(rest / 1000) * 1000 >= 1000 ? Math.round(rest / 1000) + "천" : rest}만` : `${eok}억`;
+    }
+    return `${manwon.toLocaleString()}만`;
+  };
+
   const summaryA = useMemo(() => {
     if (!result?.a?.prices?.length) return null;
     const first = result.a.prices[0];
@@ -205,20 +245,63 @@ export default function AptBattleClient() {
       {/* ── 입력 / 로딩 ── */}
       {(phase === "input" || phase === "loading") && (
         <>
-          {/* 빠른 프리셋 */}
-          <div className="flex flex-wrap gap-1.5 justify-center">
-            {PRESETS.map((p, i) => (
+          {/* 랜덤 매칭 */}
+          <div className="rounded-xl border bg-gradient-to-br from-amber-50 to-orange-50 p-3.5 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <Dice5 className="h-4 w-4 text-amber-600" />
+              <span className="text-xs font-bold text-amber-800">랜덤 매칭</span>
+              <span className="text-[10px] text-amber-600/70">같은 구에서 랜덤 2개!</span>
+            </div>
+            <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+              <div className="relative">
+                <select
+                  value={randomSido}
+                  onChange={(e) => { setRandomSido(e.target.value); setRandomCode(""); }}
+                  className="w-full h-9 rounded-lg border bg-white px-2.5 text-xs appearance-none cursor-pointer pr-7"
+                >
+                  <option value="">시/도</option>
+                  {sidoList.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, "")}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              </div>
+              <div className="relative">
+                <select
+                  value={randomCode}
+                  onChange={(e) => setRandomCode(e.target.value)}
+                  disabled={!randomSido}
+                  className="w-full h-9 rounded-lg border bg-white px-2.5 text-xs appearance-none cursor-pointer pr-7 disabled:opacity-50"
+                >
+                  <option value="">시/군/구</option>
+                  {sigunguList.map((sg) => (
+                    <option key={sg.code} value={sg.code}>{sg.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              </div>
               <button
-                key={i}
-                onClick={() => {
-                  setAptA(p.a);
-                  setAptB(p.b);
-                }}
-                className="text-[11px] px-2.5 py-1 rounded-full bg-zinc-100 hover:bg-zinc-200 transition-colors font-medium"
+                onClick={handleRandomMatch}
+                disabled={!randomCode || isRandomLoading}
+                className="h-9 px-3.5 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0"
               >
-                {p.label}
+                {isRandomLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Dice5 className="h-3.5 w-3.5" />
+                )}
+                뽑기
               </button>
-            ))}
+            </div>
+          </div>
+
+          {/* 또는 구분선 */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-zinc-200" />
+            <span className="text-[10px] text-muted-foreground font-medium">또는 직접 선택</span>
+            <div className="flex-1 h-px bg-zinc-200" />
           </div>
 
           <div className="space-y-4">
@@ -236,6 +319,13 @@ export default function AptBattleClient() {
               label="🏠 아파트 B"
               color="#7c3aed"
             />
+
+            {/* 동일 아파트 경고 */}
+            {aptA && aptB && aptA.lawdCd === aptB.lawdCd && aptA.name === aptB.name && aptA.area === aptB.area && (
+              <p className="text-xs text-amber-600 text-center font-medium">
+                ⚠️ 같은 아파트끼리는 비교할 수 없어요. 다른 아파트를 선택해주세요.
+              </p>
+            )}
 
             {/* 기간 선택 */}
             <div className="flex items-center gap-2 justify-center">
@@ -262,7 +352,7 @@ export default function AptBattleClient() {
             {/* 배틀 시작 버튼 */}
             <Button
               onClick={() => aptA && aptB && startBattle(aptA, aptB, years)}
-              disabled={!aptA || !aptB || phase === "loading"}
+              disabled={!aptA || !aptB || phase === "loading" || (aptA?.lawdCd === aptB?.lawdCd && aptA?.name === aptB?.name && aptA?.area === aptB?.area)}
               className="w-full h-12 rounded-xl text-base font-bold bg-gradient-to-r from-emerald-600 to-violet-600 hover:from-emerald-700 hover:to-violet-700"
             >
               {phase === "loading" ? (
@@ -323,11 +413,18 @@ export default function AptBattleClient() {
                     {summaryA.change >= 0 ? "+" : ""}
                     {summaryA.change.toFixed(1)}%
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    평당 {Math.round(summaryA.first.pricePerPyeong).toLocaleString()}만
-                    <ArrowRight className="inline h-3 w-3 mx-0.5" />
-                    {Math.round(summaryA.last.pricePerPyeong).toLocaleString()}만
-                  </p>
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground">
+                      평당 {Math.round(summaryA.first.pricePerPyeong).toLocaleString()}만
+                      <ArrowRight className="inline h-3 w-3 mx-0.5" />
+                      {Math.round(summaryA.last.pricePerPyeong).toLocaleString()}만
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      매매 {fmtPrice(summaryA.first.price)}
+                      <ArrowRight className="inline h-3 w-3 mx-0.5" />
+                      {fmtPrice(summaryA.last.price)}
+                    </p>
+                  </div>
                 </>
               )}
             </div>
@@ -354,11 +451,18 @@ export default function AptBattleClient() {
                     {summaryB.change >= 0 ? "+" : ""}
                     {summaryB.change.toFixed(1)}%
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    평당 {Math.round(summaryB.first.pricePerPyeong).toLocaleString()}만
-                    <ArrowRight className="inline h-3 w-3 mx-0.5" />
-                    {Math.round(summaryB.last.pricePerPyeong).toLocaleString()}만
-                  </p>
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground">
+                      평당 {Math.round(summaryB.first.pricePerPyeong).toLocaleString()}만
+                      <ArrowRight className="inline h-3 w-3 mx-0.5" />
+                      {Math.round(summaryB.last.pricePerPyeong).toLocaleString()}만
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      매매 {fmtPrice(summaryB.first.price)}
+                      <ArrowRight className="inline h-3 w-3 mx-0.5" />
+                      {fmtPrice(summaryB.last.price)}
+                    </p>
+                  </div>
                 </>
               )}
             </div>

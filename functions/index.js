@@ -39,5 +39,4 @@ exports.pegHistory = pegChart.pegHistory;
 const aptBattle = require("./apt-battle");
 exports.aptSearch = aptBattle.aptSearch;
 exports.aptBattle = aptBattle.aptBattle;
-exports.aptBattleOg = aptBattle.aptBattleOg;
 exports.aptBattleView = aptBattle.aptBattleView;

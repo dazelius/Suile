@@ -69,11 +69,6 @@
         "source": "/ab",
         "function": "aptBattleView",
         "region": "asia-northeast3"
-      },
-      {
-        "source": "/aptBattleOg",
-        "function": "aptBattleOg",
-        "region": "asia-northeast3"
       }
     ],
     "headers": [

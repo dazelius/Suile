@@ -9,268 +9,192 @@ import {
   YAxis,
   ReferenceLine,
 } from "recharts";
-import { Trophy, Zap } from "lucide-react";
+import { Trophy, TrendingUp, TrendingDown } from "lucide-react";
 
-interface PricePoint {
-  date: string;
-  price: number;
-  pricePerPyeong: number;
-}
-interface AptData {
-  name: string;
-  area: number;
-  lawdCd: string;
-  prices: PricePoint[];
-}
+interface PricePoint { date: string; price: number; pricePerPyeong: number; floor?: string; }
+interface AptData { name: string; area: number; lawdCd: string; prices: PricePoint[]; }
+interface Props { dataA: AptData; dataB: AptData; regionA: string; regionB: string; onComplete: () => void; }
 
-interface AptBattleAnimationProps {
-  dataA: AptData;
-  dataB: AptData;
-  regionA: string; // 서울 강남구
-  regionB: string;
-  onComplete: () => void;
+function fmtPrice(n: number) {
+  if (n >= 10000) { const e = Math.floor(n / 10000), r = Math.round((n % 10000) / 1000); return r > 0 ? `${e}억${r}천` : `${e}억`; }
+  return `${n.toLocaleString()}만`;
 }
+function fmtPP(n: number) { return n >= 10000 ? `${(n / 10000).toFixed(1)}만` : `${Math.round(n).toLocaleString()}`; }
 
-function formatManwon(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(0)}만`;
-  return `${n.toLocaleString()}`;
-}
+interface TxEvent { side: "A" | "B"; date: string; price: number; pp: number; floor?: string; }
+interface ChartRow { idx: number; date: string; retA: number; retB: number; ppA: number; ppB: number; priceA: number; priceB: number; cumA: number; cumB: number; }
 
-interface ChartRow {
-  idx: number;
-  retA: number;
-  retB: number;
-  ppA: number;
-  ppB: number;
-  date: string;
+function build(a: AptData, b: AptData) {
+  const evs: TxEvent[] = [];
+  for (const p of a.prices) evs.push({ side: "A", date: p.date, price: p.price, pp: p.pricePerPyeong, floor: p.floor });
+  for (const p of b.prices) evs.push({ side: "B", date: p.date, price: p.price, pp: p.pricePerPyeong, floor: p.floor });
+  evs.sort((x, y) => x.date.localeCompare(y.date));
+
+  const initA = a.prices[0]?.pricePerPyeong || 1, initB = b.prices[0]?.pricePerPyeong || 1;
+  let ppA = initA, ppB = initB, prA = a.prices[0]?.price || 0, prB = b.prices[0]?.price || 0, cA = 0, cB = 0;
+  const rows: ChartRow[] = [];
+  for (let i = 0; i < evs.length; i++) {
+    const ev = evs[i];
+    if (ev.side === "A") { ppA = ev.pp; prA = ev.price; cA++; } else { ppB = ev.pp; prB = ev.price; cB++; }
+    if (!prA) prA = ev.price; if (!prB) prB = ev.price;
+    rows.push({ idx: i, date: ev.date, retA: ((ppA - initA) / initA) * 100, retB: ((ppB - initB) / initB) * 100, ppA, ppB, priceA: prA, priceB: prB, cumA: cA, cumB: cB });
+  }
+  return { rows, evs };
 }
 
-function buildData(a: AptData, b: AptData): ChartRow[] {
-  const mapA = new Map(a.prices.map((p) => [p.date, p.pricePerPyeong]));
-  const mapB = new Map(b.prices.map((p) => [p.date, p.pricePerPyeong]));
-  const dates = [...new Set([...mapA.keys(), ...mapB.keys()])].sort();
-  if (dates.length === 0) return [];
-  
-  const s1 = a.prices[0]?.pricePerPyeong || 1;
-  const s2 = b.prices[0]?.pricePerPyeong || 1;
-  let la = s1, lb = s2;
+export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete }: Props) {
+  const { rows, evs } = useRef(build(dataA, dataB)).current;
+  const total = rows.length;
 
-  return dates.map((date, idx) => {
-    const ca = mapA.get(date) ?? la;
-    const cb = mapB.get(date) ?? lb;
-    la = ca;
-    lb = cb;
-    return {
-      idx,
-      date,
-      retA: ((ca - s1) / s1) * 100,
-      retB: ((cb - s2) / s2) * 100,
-      ppA: ca,
-      ppB: cb,
-    };
-  });
-}
-
-const MESSAGES_LEAD = [
-  "{name}이(가) 앞서갑니다!",
-  "{name} 쾌속 상승 중!",
-  "{name} 압도적 리드!",
-  "{name}, 부동산 최강자?!",
-];
-const MESSAGES_CLOSE = [
-  "초박빙 승부! 역전 가능!",
-  "엎치락뒤치락! 팽팽한 대결!",
-  "0.1%p 차이! 숨 막히는 접전!",
-];
-const MESSAGES_REVERSE = [
-  "🔥 역전이다! {name}이(가) 치고 올라옵니다!",
-  "💥 반전! {name}이(가) 역전 성공!",
-];
-
-export function AptBattleAnimation({
-  dataA,
-  dataB,
-  regionA,
-  regionB,
-  onComplete,
-}: AptBattleAnimationProps) {
-  const allRows = useRef(buildData(dataA, dataB));
   const [progress, setProgress] = useState(0);
-  const [message, setMessage] = useState("🏠 배틀 시작!");
   const [showWinner, setShowWinner] = useState(false);
-  const prevLeader = useRef<"A" | "B" | null>(null);
-  const animRef = useRef<number>(0);
+  const animRef = useRef(0);
 
-  const total = allRows.current.length;
-  const visibleData = allRows.current.slice(0, Math.max(1, progress));
-  const current = visibleData[visibleData.length - 1];
-
-  const advanceMessage = useCallback(
-    (row: ChartRow) => {
-      const diff = Math.abs(row.retA - row.retB);
-      const leader: "A" | "B" = row.retA >= row.retB ? "A" : "B";
-      const leaderName = leader === "A" ? dataA.name : dataB.name;
-
-      if (prevLeader.current && prevLeader.current !== leader) {
-        const msgs = MESSAGES_REVERSE;
-        setMessage(
-          msgs[Math.floor(Math.random() * msgs.length)].replace("{name}", leaderName)
-        );
-      } else if (diff < 2) {
-        const msgs = MESSAGES_CLOSE;
-        setMessage(msgs[Math.floor(Math.random() * msgs.length)]);
-      } else {
-        const msgs = MESSAGES_LEAD;
-        setMessage(
-          msgs[Math.floor(Math.random() * msgs.length)].replace("{name}", leaderName)
-        );
-      }
-      prevLeader.current = leader;
-    },
-    [dataA.name, dataB.name]
-  );
-
+  // 15초 동안 처음부터 끝까지 선형 재생
   useEffect(() => {
-    if (total <= 1) {
-      setShowWinner(true);
-      setTimeout(onComplete, 1000);
-      return;
-    }
+    if (total <= 1) { setShowWinner(true); setTimeout(onComplete, 1500); return; }
+    const DURATION = 15000; // 15초
+    const start = performance.now();
 
-    let frame = 0;
-    const TOTAL_FRAMES = 200; // ~6.5초
-    const framesToStep = TOTAL_FRAMES / total;
-    let msgFrame = 0;
-
-    const tick = () => {
-      frame++;
-      const step = Math.min(total, Math.ceil(frame / framesToStep));
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const pct = Math.min(1, elapsed / DURATION);
+      const step = Math.min(total, Math.max(1, Math.ceil(pct * total)));
       setProgress(step);
 
-      // 메시지 업데이트 (약 1.5초 간격)
-      if (frame - msgFrame > 45 && step < total) {
-        msgFrame = frame;
-        advanceMessage(allRows.current[step - 1]);
-      }
-
-      if (step >= total) {
-        const last = allRows.current[total - 1];
-        const winnerName = last.retA > last.retB ? dataA.name : last.retB > last.retA ? dataB.name : "무승부";
-        setMessage(`🏆 ${winnerName === "무승부" ? "무승부!" : `${winnerName} 승리!`}`);
+      if (pct >= 1) {
+        setProgress(total);
         setShowWinner(true);
-        setTimeout(onComplete, 2000);
+        setTimeout(onComplete, 2500);
         return;
       }
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animRef.current);
-  }, [total, advanceMessage, onComplete, dataA.name, dataB.name]);
+  }, [total, onComplete]);
 
-  const retA = current?.retA ?? 0;
-  const retB = current?.retB ?? 0;
-  const total100 = Math.abs(retA) + Math.abs(retB) || 1;
-  const barA = (Math.abs(retA) / total100) * 100;
+  const vis = rows.slice(0, Math.max(1, progress));
+  const cur = vis[vis.length - 1];
+  const retA = cur?.retA ?? 0, retB = cur?.retB ?? 0;
+  const cA = cur?.cumA ?? 0, cB = cur?.cumB ?? 0;
+  const txTotal = cA + cB || 1;
+  const txBarA = Math.max(5, (cA / txTotal) * 100);
+
+  // 현재 시점 년도
+  const curDate = cur?.date ?? "";
+  const displayDate = curDate ? `${curDate.substring(0, 4)}.${curDate.substring(5, 7)}` : "";
+
+  // 최종 결과
+  const lastRow = rows[total - 1];
+  const winA = (lastRow?.retA ?? 0) > (lastRow?.retB ?? 0);
+  const winB = (lastRow?.retB ?? 0) > (lastRow?.retA ?? 0);
+  const winnerName = winA ? dataA.name : winB ? dataB.name : "";
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col animate-in fade-in-0 duration-300">
-      {/* 상단: 선수 정보 */}
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-3 pt-3 pb-1">
-        {/* A */}
+    <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col">
+      {/* 프로그레스 */}
+      <div className="h-0.5 bg-zinc-800">
+        <div className="h-full bg-gradient-to-r from-emerald-500 to-violet-500 transition-all duration-75" style={{ width: `${(progress / total) * 100}%` }} />
+      </div>
+
+      {/* 상단: 이름 + 수익률 */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center px-3 pt-2.5 pb-1">
         <div className="flex items-center gap-2">
-          <div className="w-11 h-11 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-lg">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-base shrink-0">
             {dataA.name.charAt(0)}
           </div>
           <div className="min-w-0">
-            <p className="text-white text-xs font-bold truncate">{dataA.name}</p>
-            <p className="text-emerald-400 text-[10px] truncate">{regionA}</p>
+            <p className="text-white text-[11px] font-bold truncate">{dataA.name}</p>
+            <p className={`text-sm font-black ${retA >= 0 ? "text-red-400" : "text-blue-400"}`}>
+              {retA >= 0 ? "+" : ""}{retA.toFixed(1)}%
+            </p>
           </div>
         </div>
-        {/* VS */}
-        <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
-          <Zap className="h-4 w-4 text-yellow-400" />
+        {/* 시간 */}
+        <div className="text-center shrink-0 px-2">
+          <p className="text-zinc-400 text-lg font-mono font-bold tabular-nums">{displayDate}</p>
         </div>
-        {/* B */}
         <div className="flex items-center gap-2 justify-end">
           <div className="min-w-0 text-right">
-            <p className="text-white text-xs font-bold truncate">{dataB.name}</p>
-            <p className="text-violet-400 text-[10px] truncate">{regionB}</p>
+            <p className="text-white text-[11px] font-bold truncate">{dataB.name}</p>
+            <p className={`text-sm font-black ${retB >= 0 ? "text-red-400" : "text-blue-400"}`}>
+              {retB >= 0 ? "+" : ""}{retB.toFixed(1)}%
+            </p>
           </div>
-          <div className="w-11 h-11 rounded-xl bg-violet-600 flex items-center justify-center text-white font-bold text-lg">
+          <div className="w-10 h-10 rounded-xl bg-violet-600 flex items-center justify-center text-white font-bold text-base shrink-0">
             {dataB.name.charAt(0)}
           </div>
         </div>
       </div>
 
-      {/* 실황 메시지 */}
-      <div className="px-4 py-1.5 text-center">
-        <p className="text-white/90 text-xs font-medium min-h-[18px]">{message}</p>
-      </div>
-
-      {/* 수익률 바 */}
-      <div className="mx-3 h-7 rounded-full overflow-hidden bg-zinc-800 flex">
-        <div
-          className="h-full bg-gradient-to-r from-emerald-600 to-emerald-500 flex items-center justify-end px-2 transition-all duration-300 ease-out"
-          style={{ width: `${Math.max(barA, 8)}%` }}
-        >
-          <span className="text-white text-[10px] font-bold whitespace-nowrap">
-            {retA >= 0 ? "+" : ""}{retA.toFixed(1)}%
-          </span>
+      {/* 거래량 바 */}
+      <div className="px-3 space-y-0.5">
+        <div className="flex justify-between text-[9px] text-zinc-500 px-0.5">
+          <span>{cA}건</span>
+          <span className="text-zinc-600">거래량</span>
+          <span>{cB}건</span>
         </div>
-        <div className="flex-1 h-full bg-gradient-to-r from-violet-500 to-violet-600 flex items-center px-2 transition-all duration-300 ease-out">
-          <span className="text-white text-[10px] font-bold whitespace-nowrap">
-            {retB >= 0 ? "+" : ""}{retB.toFixed(1)}%
-          </span>
+        <div className="h-3 rounded-full overflow-hidden bg-zinc-800/50 flex">
+          <div className="h-full bg-emerald-600/70 transition-all duration-150 ease-out" style={{ width: `${txBarA}%` }} />
+          <div className="flex-1 h-full bg-violet-600/70 transition-all duration-150 ease-out" />
         </div>
       </div>
 
       {/* 차트 */}
       <div className="flex-1 px-1 pt-2 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={visibleData} margin={{ top: 8, right: 4, bottom: 4, left: 0 }}>
+          <AreaChart data={vis} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
             <XAxis dataKey="date" hide />
             <YAxis hide domain={["auto", "auto"]} />
-            <ReferenceLine y={0} stroke="#52525b" strokeDasharray="3 3" />
-            <Area
-              type="monotone"
-              dataKey="retA"
-              stroke="#10b981"
-              fill="#10b981"
-              fillOpacity={0.15}
-              strokeWidth={2}
-              isAnimationActive={false}
-            />
-            <Area
-              type="monotone"
-              dataKey="retB"
-              stroke="#8b5cf6"
-              fill="#8b5cf6"
-              fillOpacity={0.15}
-              strokeWidth={2}
-              isAnimationActive={false}
-            />
+            <ReferenceLine y={0} stroke="#3f3f46" strokeDasharray="4 4" />
+            <Area type="stepAfter" dataKey="retA" stroke="#10b981" fill="#10b981" fillOpacity={0.1} strokeWidth={2} isAnimationActive={false} />
+            <Area type="stepAfter" dataKey="retB" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.1} strokeWidth={2} isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      {/* 하단: 현재 평당가 */}
-      <div className="grid grid-cols-2 gap-2 px-4 pb-4 pt-1">
-        <div className="bg-zinc-900 rounded-xl p-2.5 text-center border border-emerald-900/30">
-          <p className="text-[10px] text-emerald-400 mb-0.5">평당가</p>
-          <p className="text-white text-sm font-bold">{formatManwon(current?.ppA ?? 0)}원</p>
+      {/* 하단: 평당가 + 매매가 */}
+      <div className="grid grid-cols-2 gap-2 px-3 pb-3 pt-1">
+        <div className="bg-zinc-900/80 rounded-xl p-2 border border-emerald-900/20">
+          <p className="text-[9px] text-emerald-400/70 font-medium">평당가</p>
+          <p className="text-white text-base font-black">{fmtPP(cur?.ppA ?? 0)}<span className="text-[9px] text-zinc-600">만</span></p>
+          <p className="text-zinc-600 text-[9px]">매매 {fmtPrice(cur?.priceA ?? 0)}</p>
         </div>
-        <div className="bg-zinc-900 rounded-xl p-2.5 text-center border border-violet-900/30">
-          <p className="text-[10px] text-violet-400 mb-0.5">평당가</p>
-          <p className="text-white text-sm font-bold">{formatManwon(current?.ppB ?? 0)}원</p>
+        <div className="bg-zinc-900/80 rounded-xl p-2 border border-violet-900/20">
+          <p className="text-[9px] text-violet-400/70 font-medium">평당가</p>
+          <p className="text-white text-base font-black">{fmtPP(cur?.ppB ?? 0)}<span className="text-[9px] text-zinc-600">만</span></p>
+          <p className="text-zinc-600 text-[9px]">매매 {fmtPrice(cur?.priceB ?? 0)}</p>
         </div>
       </div>
 
       {/* 승자 오버레이 */}
       {showWinner && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60 animate-in fade-in-0 duration-500">
-          <div className="text-center space-y-2">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/75 animate-in fade-in-0 duration-500">
+          <div className="text-center space-y-4 px-6">
             <Trophy className="h-12 w-12 text-yellow-400 mx-auto animate-bounce" />
-            <p className="text-white text-2xl font-black">{message}</p>
+            <p className="text-white text-xl font-black">
+              {winnerName ? `${winnerName} 승리!` : "무승부!"}
+            </p>
+            <div className="flex items-end justify-center gap-5">
+              <div className="text-center">
+                <p className="text-emerald-400 text-[11px] font-bold mb-1">{dataA.name}</p>
+                <p className={`text-2xl font-black ${(lastRow?.retA ?? 0) >= 0 ? "text-red-400" : "text-blue-400"}`}>
+                  {(lastRow?.retA ?? 0) >= 0 ? "+" : ""}{(lastRow?.retA ?? 0).toFixed(1)}%
+                </p>
+                <p className="text-zinc-500 text-[10px] mt-0.5">{fmtPrice(lastRow?.priceA ?? 0)}</p>
+                <p className="text-zinc-600 text-[9px]">{lastRow?.cumA ?? 0}건 거래</p>
+              </div>
+              <p className="text-zinc-600 text-lg font-bold pb-3">vs</p>
+              <div className="text-center">
+                <p className="text-violet-400 text-[11px] font-bold mb-1">{dataB.name}</p>
+                <p className={`text-2xl font-black ${(lastRow?.retB ?? 0) >= 0 ? "text-red-400" : "text-blue-400"}`}>
+                  {(lastRow?.retB ?? 0) >= 0 ? "+" : ""}{(lastRow?.retB ?? 0).toFixed(1)}%
+                </p>
+                <p className="text-zinc-500 text-[10px] mt-0.5">{fmtPrice(lastRow?.priceB ?? 0)}</p>
+                <p className="text-zinc-600 text-[9px]">{lastRow?.cumB ?? 0}건 거래</p>
+              </div>
+            </div>
           </div>
         </div>
       )}

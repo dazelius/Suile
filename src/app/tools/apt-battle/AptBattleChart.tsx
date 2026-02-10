@@ -25,21 +25,23 @@ interface AptBattleChartProps {
 }
 
 export function AptBattleChart({ nameA, nameB, pricesA, pricesB }: AptBattleChartProps) {
-  // 통합 차트 데이터 (날짜 기준 merge)
-  const allDates = new Set<string>();
-  for (const p of pricesA) allDates.add(p.date);
-  for (const p of pricesB) allDates.add(p.date);
-  const sortedDates = Array.from(allDates).sort();
+  // 개별 거래건을 시간순 인터리브 → 최근가 방식으로 양쪽 다 표시
+  const events: { date: string; side: "A" | "B"; pp: number; price: number }[] = [];
+  for (const p of pricesA) events.push({ date: p.date, side: "A", pp: p.pricePerPyeong, price: p.price });
+  for (const p of pricesB) events.push({ date: p.date, side: "B", pp: p.pricePerPyeong, price: p.price });
+  events.sort((a, b) => a.date.localeCompare(b.date));
 
-  const chartData = sortedDates.map((date) => {
-    const a = pricesA.find((p) => p.date === date);
-    const b = pricesB.find((p) => p.date === date);
+  let lastA: number | null = null, lastB: number | null = null;
+  let lastPA: number | null = null, lastPB: number | null = null;
+  const chartData = events.map((ev) => {
+    if (ev.side === "A") { lastA = ev.pp; lastPA = ev.price; }
+    else { lastB = ev.pp; lastPB = ev.price; }
     return {
-      date,
-      a: a ? a.pricePerPyeong : null,
-      b: b ? b.pricePerPyeong : null,
-      priceA: a ? a.price : null,
-      priceB: b ? b.price : null,
+      date: ev.date,
+      a: lastA,
+      b: lastB,
+      priceA: lastPA,
+      priceB: lastPB,
     };
   });
 
@@ -102,24 +104,26 @@ export function AptBattleChart({ nameA, nameB, pricesA, pricesB }: AptBattleChar
             }}
           />
           <Area
-            type="monotone"
+            type="stepAfter"
             dataKey="a"
             stroke="#059669"
             fill="#059669"
-            fillOpacity={0.1}
-            strokeWidth={2.5}
+            fillOpacity={0.08}
+            strokeWidth={2}
             connectNulls
             name={nameA}
+            dot={{ r: 2, fill: "#059669", strokeWidth: 0 }}
           />
           <Area
-            type="monotone"
+            type="stepAfter"
             dataKey="b"
             stroke="#7c3aed"
             fill="#7c3aed"
-            fillOpacity={0.1}
-            strokeWidth={2.5}
+            fillOpacity={0.08}
+            strokeWidth={2}
             connectNulls
             name={nameB}
+            dot={{ r: 2, fill: "#7c3aed", strokeWidth: 0 }}
           />
           <Legend
             wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
