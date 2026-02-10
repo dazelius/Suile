@@ -43,7 +43,8 @@ export function QrLetterCreator() {
     };
 
     const encoded = encodeLetterData(data);
-    const url = `${getOrigin()}/m?d=${encoded}`;
+    // /v 경로 = Cloud Function이 동적 OG meta를 삽입 후 /m으로 리다이렉트
+    const url = `${getOrigin()}/v?d=${encoded}`;
     setLetterUrl(url);
 
     try {

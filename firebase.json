@@ -4,6 +4,18 @@
     "cleanUrls": true,
     "trailingSlash": false,
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/v",
+        "function": "messageView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/ogImage",
+        "function": "ogImage",
+        "region": "asia-northeast3"
+      }
+    ],
     "headers": [
       {
         "source": "**/*.@(js|css)",
@@ -24,5 +36,12 @@
         ]
       }
     ]
-  }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "nodejs20"
+    }
+  ]
 }
