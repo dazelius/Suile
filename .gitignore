@@ -38,6 +38,7 @@ yarn-error.log*
 
 # firebase
 .firebase
+functions/node_modules
 
 # typescript
 *.tsbuildinfo
