@@ -39,7 +39,7 @@ export function QrLetterCreator() {
     };
 
     const encoded = encodeLetterData(data);
-    const url = `${getOrigin()}/m/${encoded}`;
+    const url = `${getOrigin()}/m?d=${encoded}`;
     setLetterUrl(url);
 
     try {

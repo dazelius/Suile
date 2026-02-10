@@ -61,7 +61,6 @@ export function LetterView({ encoded }: LetterViewProps) {
     <div className="min-h-dvh bg-zinc-50 flex flex-col items-center justify-center px-5 py-12 safe-area-inset">
       <AnimatePresence mode="wait">
         {!isOpened ? (
-          /* ===== 잠금 화면 ===== */
           <motion.div
             key="locked"
             initial={{ opacity: 0, y: 20 }}
@@ -70,7 +69,6 @@ export function LetterView({ encoded }: LetterViewProps) {
             transition={{ duration: 0.4 }}
             className="flex flex-col items-center gap-8 w-full max-w-xs"
           >
-            {/* 잠금 아이콘 */}
             <motion.div
               animate={{ y: [0, -6, 0] }}
               transition={{
@@ -83,7 +81,6 @@ export function LetterView({ encoded }: LetterViewProps) {
               <div className="w-20 h-20 rounded-3xl bg-zinc-900 flex items-center justify-center shadow-2xl">
                 <Lock className="h-8 w-8 text-white" />
               </div>
-              {/* 빛나는 점 */}
               <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full animate-pulse border-2 border-zinc-50" />
             </motion.div>
 
@@ -124,7 +121,6 @@ export function LetterView({ encoded }: LetterViewProps) {
             </p>
           </motion.div>
         ) : (
-          /* ===== 메시지 공개 ===== */
           <motion.div
             key="message"
             initial={{ opacity: 0, y: 30, scale: 0.97 }}
@@ -132,9 +128,7 @@ export function LetterView({ encoded }: LetterViewProps) {
             transition={{ duration: 0.5, ease: "easeOut" }}
             className="w-full max-w-sm"
           >
-            {/* 메시지 카드 */}
             <div className="rounded-2xl bg-white border border-zinc-200 shadow-xl overflow-hidden">
-              {/* 상단 바 */}
               <div className="flex items-center gap-2 px-5 py-3 border-b border-zinc-100 bg-zinc-50/50">
                 <Unlock className="h-3.5 w-3.5 text-green-500" />
                 <span className="text-xs text-zinc-500 font-medium">
@@ -142,7 +136,6 @@ export function LetterView({ encoded }: LetterViewProps) {
                 </span>
               </div>
 
-              {/* 메시지 본문 */}
               <div className="px-5 py-6">
                 {hasTo && (
                   <motion.p
@@ -177,7 +170,6 @@ export function LetterView({ encoded }: LetterViewProps) {
               </div>
             </div>
 
-            {/* 나도 만들기 CTA */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -197,7 +189,6 @@ export function LetterView({ encoded }: LetterViewProps) {
                 {siteConfig.name} - QR 비밀 메시지
               </p>
 
-              {/* 광고 */}
               <div className="mt-6">
                 <AdSlot />
               </div>

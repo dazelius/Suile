@@ -12,7 +12,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   // 메시지 열람 페이지는 풀스크린
-  const isFullscreen = pathname.startsWith("/m/");
+  const isFullscreen = pathname === "/m" || pathname.startsWith("/m/");
 
   if (isFullscreen) {
     return <>{children}</>;
