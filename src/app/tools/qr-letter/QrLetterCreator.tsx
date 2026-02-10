@@ -221,54 +221,27 @@ export function QrLetterCreator() {
         </p>
       </div>
 
-      {/* ========== 1. 공유하기 ========== */}
+      {/* ========== 1. QR코드 + 공유하기 ========== */}
       <div className="rounded-xl border-2 border-zinc-200 bg-zinc-50 p-4">
         {letterUrl && (
           <ShareButtons
             url={letterUrl}
             title="비밀 메시지가 도착했어요"
             description="누군가 당신에게 비밀 메시지를 보냈어요. 열어보세요!"
+            qrDataUrl={qrDataUrl}
           />
         )}
       </div>
 
-      {/* ========== 2. QR코드 (보조) ========== */}
-      <details className="group rounded-xl border bg-background">
-        <summary className="flex items-center justify-between cursor-pointer p-4 text-sm font-semibold select-none">
-          <span className="flex items-center gap-2">
-            <Download className="h-4 w-4" />
-            QR코드 다운로드
-          </span>
-          <span className="text-xs text-muted-foreground font-normal group-open:hidden">
-            카드·선물에 붙이기
-          </span>
-        </summary>
-        <div className="px-4 pb-4 space-y-4">
-          {/* QR코드 이미지 */}
-          <div className="flex flex-col items-center">
-            {qrDataUrl && (
-              <div className="rounded-2xl bg-white p-4 shadow-sm border">
-                <img
-                  src={qrDataUrl}
-                  alt="비밀 메시지 QR코드"
-                  className="w-44 h-44 sm:w-52 sm:h-52"
-                />
-              </div>
-            )}
-          </div>
-          <Button
-            onClick={downloadQR}
-            variant="outline"
-            className="w-full h-11 gap-2 text-sm"
-          >
-            <Download className="h-4 w-4" />
-            이미지로 저장
-          </Button>
-          <p className="text-[11px] text-muted-foreground text-center">
-            QR코드를 인쇄해서 카드, 편지, 선물 포장에 붙여보세요
-          </p>
-        </div>
-      </details>
+      {/* ========== 2. QR코드 이미지 저장 ========== */}
+      <Button
+        onClick={downloadQR}
+        variant="outline"
+        className="w-full h-11 gap-2 text-sm"
+      >
+        <Download className="h-4 w-4" />
+        QR코드 이미지 저장
+      </Button>
 
       {/* ========== 3. 미리보기 + 새로 만들기 ========== */}
       <div className="flex gap-2">
