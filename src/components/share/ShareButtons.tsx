@@ -1,15 +1,28 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Copy, Check, Share2, QrCode } from "lucide-react";
+import {
+  Copy,
+  Check,
+  QrCode,
+  Download,
+  ImageIcon,
+  Share2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ShareButtonsProps {
   url: string;
   title?: string;
   description?: string;
-  /** QR코드 data URL (base64) - 공유 시 이미지 파일로 첨부 */
+  /** QR코드 data URL (base64) */
   qrDataUrl?: string | null;
+}
+
+/** data URL → Blob 변환 */
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
 }
 
 /** data URL → File 변환 */
@@ -17,49 +30,69 @@ async function dataUrlToFile(
   dataUrl: string,
   filename: string
 ): Promise<File> {
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
+  const blob = await dataUrlToBlob(dataUrl);
   return new File([blob], filename, { type: blob.type });
 }
 
-/**
- * 공유 컴포넌트
- * - QR코드 이미지 + 링크를 함께 공유 (navigator.share with files)
- * - 링크 복사: 클립보드 복사 (어디서든 동작)
- */
 export function ShareButtons({
   url,
   title = "비밀 메시지가 도착했어요",
   description = "누군가 당신에게 비밀 메시지를 보냈어요. 열어보세요!",
   qrDataUrl,
 }: ShareButtonsProps) {
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedQr, setCopiedQr] = useState(false);
 
+  // ── 링크 복사 ──
   const copyLink = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(url);
     } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = url;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
       document.execCommand("copy");
-      document.body.removeChild(textarea);
+      document.body.removeChild(ta);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   }, [url]);
 
+  // ── QR 이미지 클립보드 복사 (데스크톱에서 카톡 등에 붙여넣기 가능) ──
+  const copyQrImage = useCallback(async () => {
+    if (!qrDataUrl) return;
+    try {
+      const blob = await dataUrlToBlob(qrDataUrl);
+      // PNG blob을 ClipboardItem으로 복사
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob }),
+      ]);
+      setCopiedQr(true);
+      setTimeout(() => setCopiedQr(false), 2500);
+    } catch {
+      // Clipboard API 미지원 → QR 다운로드로 대체
+      downloadQr();
+    }
+  }, [qrDataUrl]);
+
+  // ── QR 이미지 다운로드 ──
+  const downloadQr = useCallback(() => {
+    if (!qrDataUrl) return;
+    const link = document.createElement("a");
+    link.download = "qr-secret-message.png";
+    link.href = qrDataUrl;
+    link.click();
+  }, [qrDataUrl]);
+
+  // ── 네이티브 공유 (모바일: QR 이미지 + 링크 함께 전송) ──
   const nativeShare = useCallback(async () => {
     try {
-      // QR 이미지가 있으면 파일로 첨부해서 공유
       if (qrDataUrl) {
         const file = await dataUrlToFile(qrDataUrl, "qr-secret-message.png");
-
-        // navigator.share가 파일 공유를 지원하는지 확인
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        if (navigator.canShare?.({ files: [file] })) {
           await navigator.share({
             title,
             text: `${description}\n${url}`,
@@ -68,18 +101,15 @@ export function ShareButtons({
           return;
         }
       }
-
-      // 파일 공유 미지원 → 링크만 공유
       await navigator.share({ title, text: description, url });
     } catch {
-      // 사용자가 취소하거나 미지원 → 링크 복사로 대체
       await copyLink();
     }
   }, [url, title, description, qrDataUrl, copyLink]);
 
   return (
     <div className="space-y-4">
-      {/* QR코드 미리보기 */}
+      {/* QR코드 이미지 */}
       {qrDataUrl && (
         <div className="flex flex-col items-center">
           <div className="rounded-2xl bg-white p-4 shadow-sm border">
@@ -106,7 +136,7 @@ export function ShareButtons({
           className="shrink-0 h-10 w-10"
           onClick={copyLink}
         >
-          {copied ? (
+          {copiedLink ? (
             <Check className="h-4 w-4 text-green-600" />
           ) : (
             <Copy className="h-4 w-4" />
@@ -114,38 +144,55 @@ export function ShareButtons({
         </Button>
       </div>
 
-      {/* 공유 + 복사 버튼 */}
-      <div className="grid grid-cols-2 gap-2">
+      {/* 메인 액션 버튼들 */}
+      <div className="space-y-2">
+        {/* 모바일: QR + 링크 함께 공유 */}
         <Button
           onClick={nativeShare}
-          className="h-12 gap-2 text-sm bg-zinc-900 hover:bg-zinc-800"
+          className="w-full h-12 gap-2 text-sm bg-zinc-900 hover:bg-zinc-800"
         >
-          <QrCode className="h-4 w-4" />
-          QR + 링크 공유
+          <Share2 className="h-4 w-4" />
+          QR코드 + 링크 공유하기
         </Button>
-        <Button
-          variant="outline"
-          onClick={copyLink}
-          className="h-12 gap-2 text-sm"
-        >
-          {copied ? (
-            <>
-              <Check className="h-4 w-4 text-green-600" />
-              복사 완료!
-            </>
-          ) : (
-            <>
-              <Copy className="h-4 w-4" />
-              링크 복사
-            </>
-          )}
-        </Button>
+
+        {/* QR 이미지 관련 버튼들 */}
+        {qrDataUrl && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              onClick={copyQrImage}
+              className="h-11 gap-2 text-sm"
+            >
+              {copiedQr ? (
+                <>
+                  <Check className="h-4 w-4 text-green-600" />
+                  복사 완료!
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="h-4 w-4" />
+                  QR 이미지 복사
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={downloadQr}
+              className="h-11 gap-2 text-sm"
+            >
+              <Download className="h-4 w-4" />
+              QR 이미지 저장
+            </Button>
+          </div>
+        )}
       </div>
 
       <p className="text-[11px] text-muted-foreground text-center">
-        {copied
-          ? "링크가 복사되었어요! 원하는 곳에 붙여넣기 하세요."
-          : "QR코드 이미지와 링크가 함께 전송돼요 (카카오톡, 문자 등)"}
+        {copiedQr
+          ? "QR 이미지가 복사됐어요! 카톡/메신저에 붙여넣기(Ctrl+V) 하세요."
+          : copiedLink
+            ? "링크가 복사되었어요! 원하는 곳에 붙여넣기 하세요."
+            : "공유하기 → 카톡·문자로 전송 | QR 이미지 복사 → 붙여넣기"}
       </p>
     </div>
   );

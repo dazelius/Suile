@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import QRCode from "qrcode";
-import { Download, RotateCcw, Eye, Lock, Send } from "lucide-react";
+import { RotateCcw, Eye, Lock, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -56,14 +56,6 @@ export function QrLetterCreator() {
       console.error("QR 생성 실패:", err);
     }
   }, [from, to, message, isValid]);
-
-  const downloadQR = useCallback(() => {
-    if (!qrDataUrl) return;
-    const link = document.createElement("a");
-    link.download = "secret-message-qr.png";
-    link.href = qrDataUrl;
-    link.click();
-  }, [qrDataUrl]);
 
   const reset = () => {
     setFrom("");
@@ -233,17 +225,7 @@ export function QrLetterCreator() {
         )}
       </div>
 
-      {/* ========== 2. QR코드 이미지 저장 ========== */}
-      <Button
-        onClick={downloadQR}
-        variant="outline"
-        className="w-full h-11 gap-2 text-sm"
-      >
-        <Download className="h-4 w-4" />
-        QR코드 이미지 저장
-      </Button>
-
-      {/* ========== 3. 미리보기 + 새로 만들기 ========== */}
+      {/* ========== 2. 미리보기 + 새로 만들기 ========== */}
       <div className="flex gap-2">
         {previewUrl && (
           <Button
