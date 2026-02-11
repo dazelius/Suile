@@ -37,6 +37,9 @@ export const metadata: Metadata = {
       "녹음 → 텍스트 변환 → AI 자동 정리! 회의록을 한번에",
     images: [`${siteConfig.url}/meeting-note-og.png`],
   },
+  alternates: {
+    canonical: `${siteConfig.url}/tools/meeting-note`,
+  },
 };
 
 export default function MeetingNotePage() {

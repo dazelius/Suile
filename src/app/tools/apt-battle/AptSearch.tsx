@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Search, ChevronDown, Loader2, X, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { getSidoList, getSigunguList, getFullRegionName } from "./region-codes";
+import { useI18n } from "@/components/i18n/I18nProvider";
 
 const APT_SEARCH_URL =
   "https://asia-northeast3-suile-21173.cloudfunctions.net/aptSearch";
@@ -13,14 +14,14 @@ export interface AptSelection {
   name: string;
   area: number;
   dong: string;
-  regionName: string; // "서울 강남구"
+  regionName: string;
 }
 
 interface AptSearchProps {
   value: AptSelection | null;
   onChange: (apt: AptSelection | null) => void;
   label?: string;
-  color?: string; // 라벨 강조색
+  color?: string;
 }
 
 interface AptResult {
@@ -34,7 +35,35 @@ interface AptResult {
   txCount: number;
 }
 
+const L = {
+  ko: {
+    sidoSelect: "시/도 선택",
+    sigunguSelect: "시/군/구 선택",
+    placeholder: "아파트명 검색... (예: 래미안, 자이)",
+    noResults: "검색 결과 없음",
+    searchPrompt: "아파트를 검색하세요",
+    searching: "검색 중...",
+    yearSuffix: "년",
+    eok: (v: string) => `${v}억`,
+    perPyeong: (v: string) => `평당 ${v}만`,
+  },
+  en: {
+    sidoSelect: "Select Province",
+    sigunguSelect: "Select District",
+    placeholder: "Search apartment... (e.g. Raemian, Xi)",
+    noResults: "No results",
+    searchPrompt: "Search for an apartment",
+    searching: "Searching...",
+    yearSuffix: "",
+    eok: (v: string) => `${v}억`,
+    perPyeong: (v: string) => `${v}M/py`,
+  },
+} as const;
+
 export function AptSearch({ value, onChange, label, color = "#059669" }: AptSearchProps) {
+  const { locale } = useI18n();
+  const t = locale === "ko" ? L.ko : L.en;
+
   const [selectedSido, setSelectedSido] = useState("");
   const [selectedCode, setSelectedCode] = useState("");
   const [query, setQuery] = useState("");
@@ -58,7 +87,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // 아파트 검색 API 호출
   const searchApt = useCallback(
     async (q: string) => {
       if (!selectedCode) return;
@@ -71,7 +99,7 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
           `${APT_SEARCH_URL}?lawdCd=${selectedCode}&q=${encodeURIComponent(q)}`,
           { signal: controller.signal }
         );
-        if (!res.ok) throw new Error("검색 실패");
+        if (!res.ok) throw new Error("Search failed");
         const data = await res.json();
         if (!controller.signal.aborted) {
           setResults(data.results || []);
@@ -93,7 +121,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
       if (q.length >= 1 && selectedCode) {
         debounceRef.current = setTimeout(() => searchApt(q), 400);
       } else if (q.length === 0 && selectedCode) {
-        // 빈 검색은 전체 목록
         debounceRef.current = setTimeout(() => searchApt(""), 400);
       } else {
         setResults([]);
@@ -102,7 +129,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
     [searchApt, selectedCode]
   );
 
-  // 시군구 선택 시 자동 검색
   useEffect(() => {
     if (selectedCode && !value) {
       searchApt("");
@@ -128,7 +154,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
     setResults([]);
   };
 
-  // 선택 완료 상태
   if (value) {
     return (
       <div className="space-y-1.5">
@@ -167,7 +192,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
         </label>
       )}
 
-      {/* 시도 / 시군구 선택 */}
       <div className="grid grid-cols-2 gap-2">
         <div className="relative">
           <select
@@ -179,7 +203,7 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
             }}
             className="w-full h-10 rounded-lg border bg-white px-3 text-sm appearance-none cursor-pointer pr-8"
           >
-            <option value="">시/도 선택</option>
+            <option value="">{t.sidoSelect}</option>
             {sidoList.map((sido) => (
               <option key={sido} value={sido}>
                 {sido.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, "")}
@@ -199,7 +223,7 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
             disabled={!selectedSido}
             className="w-full h-10 rounded-lg border bg-white px-3 text-sm appearance-none cursor-pointer pr-8 disabled:opacity-50"
           >
-            <option value="">시/군/구 선택</option>
+            <option value="">{t.sigunguSelect}</option>
             {sigunguList.map((sg) => (
               <option key={sg.code} value={sg.code}>
                 {sg.name}
@@ -210,7 +234,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
         </div>
       </div>
 
-      {/* 아파트 검색 */}
       {selectedCode && (
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -218,7 +241,7 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
             value={query}
             onChange={(e) => handleQuery(e.target.value)}
             onFocus={() => results.length > 0 && setIsOpen(true)}
-            placeholder="아파트명 검색... (예: 래미안, 자이)"
+            placeholder={t.placeholder}
             className="h-11 pl-9 text-sm rounded-xl"
             autoComplete="off"
           />
@@ -226,7 +249,6 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
           )}
 
-          {/* 결과 드롭다운 */}
           {isOpen && (
             <div className="absolute z-50 left-0 right-0 mt-1.5 rounded-xl border bg-white shadow-xl overflow-hidden max-h-72 overflow-y-auto">
               {results.length > 0
@@ -247,28 +269,28 @@ export function AptSearch({ value, onChange, label, color = "#059669" }: AptSear
                           {apt.name}
                         </span>
                         <span className="text-[10px] text-muted-foreground block truncate">
-                          {apt.dong} · {apt.area}m² · {apt.buildYear}년
+                          {apt.dong} · {apt.area}m² · {apt.buildYear}{t.yearSuffix}
                         </span>
                       </div>
                       <div className="text-right shrink-0">
                         <span className="text-xs font-bold block">
-                          {(apt.recentPrice / 10000).toFixed(1)}억
+                          {t.eok((apt.recentPrice / 10000).toFixed(1))}
                         </span>
                         <span className="text-[10px] text-muted-foreground block">
-                          평당 {Math.round(apt.pricePerPyeong / 10).toLocaleString()}만
+                          {t.perPyeong(Math.round(apt.pricePerPyeong / 10).toLocaleString())}
                         </span>
                       </div>
                     </button>
                   ))
                 : !isLoading && (
                     <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-                      {query ? "검색 결과 없음" : "아파트를 검색하세요"}
+                      {query ? t.noResults : t.searchPrompt}
                     </div>
                   )}
               {isLoading && results.length === 0 && (
                 <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">검색 중...</span>
+                  <span className="text-sm">{t.searching}</span>
                 </div>
               )}
             </div>

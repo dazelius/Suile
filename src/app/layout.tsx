@@ -16,39 +16,59 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteConfig.url),
   title: {
-    default: `${siteConfig.name} - 블라인드 메시지 | Blind Message`,
+    default: `${siteConfig.name} - 무료 온라인 도구 모음 | Free Online Tools`,
     template: `%s | ${siteConfig.name}`,
   },
   description: siteConfig.description,
   keywords: siteConfig.keywords,
+  authors: [{ name: siteConfig.creator }],
+  creator: siteConfig.creator,
+  publisher: siteConfig.creator,
+  formatDetection: {
+    telephone: false,
+  },
   openGraph: {
-    title: `${siteConfig.name} - 블라인드 메시지`,
-    description:
-      "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있는 블라인드 메시지 서비스.",
+    title: `${siteConfig.name} - 무료 온라인 도구 모음`,
+    description: siteConfig.description,
     url: siteConfig.url,
     siteName: siteConfig.name,
     locale: "ko_KR",
+    alternateLocale: "en_US",
     type: "website",
     images: [
       {
-        url: `${siteConfig.url}/og-qr.png`,
+        url: "/og-qr.png",
         width: 800,
         height: 800,
-        alt: "SUILE - 블라인드 메시지",
+        alt: siteConfig.name,
       },
     ],
   },
   twitter: {
-    card: "summary",
-    title: `${siteConfig.name} - 블라인드 메시지`,
-    description:
-      "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있는 블라인드 메시지 서비스.",
-    images: [`${siteConfig.url}/og-qr.png`],
+    card: "summary_large_image",
+    title: `${siteConfig.name} - 무료 온라인 도구 모음`,
+    description: siteConfig.description,
+    images: ["/og-qr.png"],
   },
   robots: {
     index: true,
     follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  alternates: {
+    canonical: siteConfig.url,
+  },
+  verification: {
+    // Google Search Console, Naver 등 인증 시 여기에 추가
+    // google: "verification-code",
   },
 };
 
@@ -67,6 +87,48 @@ export default function RootLayout({
         <meta name="theme-color" content="#ffffff" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <link rel="canonical" href={siteConfig.url} />
+        {/* JSON-LD 구조화 데이터 */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              name: siteConfig.name,
+              url: siteConfig.url,
+              description: siteConfig.description,
+              publisher: {
+                "@type": "Organization",
+                name: siteConfig.name,
+              },
+              potentialAction: {
+                "@type": "SearchAction",
+                target: `${siteConfig.url}/?q={search_term_string}`,
+                "query-input": "required name=search_term_string",
+              },
+            }),
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebApplication",
+              name: siteConfig.name,
+              url: siteConfig.url,
+              applicationCategory: "UtilityApplication",
+              operatingSystem: "Any",
+              offers: {
+                "@type": "Offer",
+                price: "0",
+                priceCurrency: "KRW",
+              },
+              description: siteConfig.description,
+            }),
+          }}
+        />
         {/* Google AdSense */}
         <script
           async

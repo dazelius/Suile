@@ -34,6 +34,9 @@ export const metadata: Metadata = {
       "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있어요.",
     images: [`${siteConfig.url}/og-qr.png`],
   },
+  alternates: {
+    canonical: `${siteConfig.url}/tools/qr-letter`,
+  },
 };
 
 export default function QrLetterPage() {

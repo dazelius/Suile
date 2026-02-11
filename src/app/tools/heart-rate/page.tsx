@@ -35,6 +35,9 @@ export const metadata: Metadata = {
     description: "카메라에 손가락만 대면 심박수 측정! PPG 기술 기반 실시간 측정",
     images: [`${siteConfig.url}/heart-rate-og.png`],
   },
+  alternates: {
+    canonical: `${siteConfig.url}/tools/heart-rate`,
+  },
 };
 
 export default function HeartRatePage() {

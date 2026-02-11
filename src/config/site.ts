@@ -1,16 +1,21 @@
 export const siteConfig = {
   name: "SUILE",
   description:
-    "SUILE - 블라인드 메시지를 보내보세요. 받는 사람만 열어볼 수 있는 비밀 메시지 서비스.",
-  url: "https://suile-21173.web.app", // Firebase Hosting 도메인
-  ogImage: "/og.png",
+    "SUILE - 무료 온라인 도구 모음. 주식 분석, AI 얼굴 평가, 연봉 계산기, 아파트 비교, 심박수 측정 등 다양한 도구를 제공합니다. Free online tools collection.",
+  url: "https://suile-21173.web.app",
+  ogImage: "/og-qr.png",
   creator: "SUILE",
   keywords: [
     "SUILE",
+    "온라인 도구",
+    "무료 도구",
+    "online tools",
+    "free tools",
     "블라인드 메시지",
-    "Blind Message",
-    "비밀 메시지",
-    "secret message",
-    "비밀 편지",
+    "주식 분석",
+    "AI 도구",
+    "연봉 계산기",
+    "아파트 비교",
+    "심박수 측정",
   ],
 };

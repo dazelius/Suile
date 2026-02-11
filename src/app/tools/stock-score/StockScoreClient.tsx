@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useSearchParams } from "next/navigation";
 import { ScoreCard } from "./ScoreCard";
 import { StockLogo } from "../stock-battle/StockLogo";
+import { useI18n } from "@/components/i18n/I18nProvider";
 
 const API_URL = "https://asia-northeast3-suile-21173.cloudfunctions.net/stockScore";
 const SEARCH_API = "https://asia-northeast3-suile-21173.cloudfunctions.net/stockSearch";
@@ -21,7 +22,33 @@ const POPULAR = [
   { ticker: "NFLX", name: "Netflix" },
 ];
 
+const L = {
+  ko: {
+    badge: "주식 성적표",
+    subtitle: "종목을 검색하면 밸류에이션 · 과매도 · AI 분석까지 한눈에",
+    placeholder: "종목 검색 (예: AAPL, Tesla, 삼성전자)",
+    searching: "검색중...",
+    analyzing: "분석 중...",
+    popular: "인기 종목",
+    errLoad: "종목 데이터 조회 실패",
+    errGeneric: "오류가 발생했습니다",
+  },
+  en: {
+    badge: "Stock Score",
+    subtitle: "Search a stock to see valuation, oversold signals & AI analysis",
+    placeholder: "Search stocks (e.g. AAPL, Tesla)",
+    searching: "Searching...",
+    analyzing: "Analyzing...",
+    popular: "Popular Stocks",
+    errLoad: "Failed to load stock data",
+    errGeneric: "An error occurred",
+  },
+} as const;
+
 export default function StockScoreClient() {
+  const { locale } = useI18n();
+  const t = locale === "ko" ? L.ko : L.en;
+
   const searchParams = useSearchParams();
   const urlTicker = searchParams.get("ticker");
 
@@ -34,30 +61,27 @@ export default function StockScoreClient() {
   const [detailData, setDetailData] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // URL 파라미터로 자동 조회
   useEffect(() => {
     if (urlTicker) loadDetail(urlTicker);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlTicker]);
 
-  // 개별 상세 로드
   const loadDetail = useCallback(async (ticker: string) => {
     setDetailLoading(true);
     setDetailData(null);
     try {
       const res = await fetch(`${API_URL}?ticker=${encodeURIComponent(ticker)}`, { cache: "no-store" });
-      if (!res.ok) throw new Error("종목 데이터 조회 실패");
+      if (!res.ok) throw new Error(t.errLoad);
       const data = await res.json();
       setDetailData(data);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
-      alert(err.message || "오류가 발생했습니다");
+      alert(err.message || t.errGeneric);
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [t]);
 
-  // 종목 검색
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchResults([]); return; }
     const timer = setTimeout(async () => {
@@ -80,18 +104,14 @@ export default function StockScoreClient() {
 
   return (
     <div className="max-w-xl mx-auto space-y-5">
-      {/* 헤더 */}
       <div className="text-center space-y-1.5">
         <div className="inline-flex items-center gap-2 bg-violet-50 px-4 py-1.5 rounded-full">
           <BarChart3 className="h-4 w-4 text-violet-600" />
-          <span className="text-sm font-bold text-violet-700">주식 성적표</span>
+          <span className="text-sm font-bold text-violet-700">{t.badge}</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          종목을 검색하면 밸류에이션 · 과매도 · AI 분석까지 한눈에
-        </p>
+        <p className="text-xs text-muted-foreground">{t.subtitle}</p>
       </div>
 
-      {/* 검색 */}
       <div className="relative">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -99,7 +119,7 @@ export default function StockScoreClient() {
             value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
             onFocus={() => setSearchOpen(true)}
-            placeholder="종목 검색 (예: AAPL, Tesla, 삼성전자)"
+            placeholder={t.placeholder}
             className="pl-9 h-11 rounded-xl text-sm"
           />
           {searchQuery && (
@@ -113,7 +133,7 @@ export default function StockScoreClient() {
           <div className="absolute z-20 top-full mt-1 w-full bg-white rounded-xl border shadow-lg max-h-60 overflow-y-auto">
             {isSearching && (
               <div className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> 검색중...
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t.searching}
               </div>
             )}
             {searchResults.map((r) => (
@@ -133,23 +153,20 @@ export default function StockScoreClient() {
         )}
       </div>
 
-      {/* 로딩 */}
       {detailLoading && (
         <div className="flex flex-col items-center gap-2 py-12">
           <Loader2 className="h-6 w-6 animate-spin text-violet-500" />
-          <span className="text-sm text-muted-foreground">분석 중...</span>
+          <span className="text-sm text-muted-foreground">{t.analyzing}</span>
         </div>
       )}
 
-      {/* 성적표 */}
       {detailData && !detailLoading && (
         <ScoreCard data={detailData} onClose={() => setDetailData(null)} />
       )}
 
-      {/* 성적표가 없을 때: 인기 종목 바로가기 */}
       {!detailData && !detailLoading && (
         <div className="space-y-3">
-          <p className="text-[11px] text-zinc-400 font-medium text-center">인기 종목</p>
+          <p className="text-[11px] text-zinc-400 font-medium text-center">{t.popular}</p>
           <div className="grid grid-cols-4 gap-2">
             {POPULAR.map((item) => (
               <button

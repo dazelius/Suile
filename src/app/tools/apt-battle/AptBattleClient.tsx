@@ -36,11 +36,89 @@ type Phase = "input" | "loading" | "animating" | "result";
 
 const YEAR_OPTIONS = [3, 5, 10];
 
+const L = {
+  ko: {
+    badge: "아파트 배틀",
+    subtitle: "전국 아파트 실거래가로 평당가 상승률 대결!",
+    randomTitle: "랜덤 매칭",
+    randomDesc: "같은 구에서 랜덤 2개!",
+    sido: "시/도",
+    sigungu: "시/군/구",
+    draw: "뽑기",
+    orDirect: "또는 직접 선택",
+    labelA: "🏠 아파트 A",
+    labelB: "🏠 아파트 B",
+    sameWarn: "⚠️ 같은 아파트끼리는 비교할 수 없어요. 다른 아파트를 선택해주세요.",
+    period: "비교 기간",
+    yearSuffix: "년",
+    loading: "데이터 불러오는 중...",
+    startBattle: "배틀 시작!",
+    win: (n: string) => `${n} 승리!`,
+    drawResult: "무승부! ⚖️",
+    perPyeong: "평당",
+    man: "만",
+    trade: "매매",
+    chartTitle: "📈 평당가 추이",
+    shareBtn: "공유하기",
+    again: "다시 배틀",
+    shareTitle: (a: string, b: string) => `${a} vs ${b} - 아파트 배틀`,
+    shareText: (a: string, b: string) => `${a} vs ${b} 어디가 더 올랐을까? 🏠`,
+    linkCopied: "링크가 복사되었습니다!",
+    errSearch: "검색 실패",
+    errNotEnough: "해당 지역에 비교할 아파트가 부족합니다. 다른 지역을 선택해주세요.",
+    errRandom: "랜덤 매칭 실패",
+    errLoad: "데이터를 불러올 수 없습니다",
+    errNoData: "실거래 데이터가 없습니다. 다른 아파트를 선택해주세요.",
+    errGeneric: "오류가 발생했습니다",
+    fmtEok: (e: number) => `${e}억`,
+    fmtEokCheon: (e: number, c: number) => `${e}억 ${c}천`,
+    fmtMan: (n: string) => `${n}만`,
+  },
+  en: {
+    badge: "Apt Battle",
+    subtitle: "Compare real transaction price growth of Korean apartments!",
+    randomTitle: "Random Match",
+    randomDesc: "Random 2 from same district!",
+    sido: "Province",
+    sigungu: "District",
+    draw: "Draw",
+    orDirect: "or select manually",
+    labelA: "🏠 Apartment A",
+    labelB: "🏠 Apartment B",
+    sameWarn: "⚠️ Cannot compare the same apartment. Please choose a different one.",
+    period: "Period",
+    yearSuffix: "Y",
+    loading: "Loading data...",
+    startBattle: "Start Battle!",
+    win: (n: string) => `${n} Wins!`,
+    drawResult: "It's a Tie! ⚖️",
+    perPyeong: "Per pyeong",
+    man: "M KRW",
+    trade: "Price",
+    chartTitle: "📈 Price per Pyeong Trend",
+    shareBtn: "Share",
+    again: "Battle Again",
+    shareTitle: (a: string, b: string) => `${a} vs ${b} - Apt Battle`,
+    shareText: (a: string, b: string) => `${a} vs ${b} — which apartment rose more? 🏠`,
+    linkCopied: "Link copied!",
+    errSearch: "Search failed",
+    errNotEnough: "Not enough apartments in this area. Please try another district.",
+    errRandom: "Random matching failed",
+    errLoad: "Failed to load data",
+    errNoData: "No transaction data found. Please try different apartments.",
+    errGeneric: "An error occurred",
+    fmtEok: (e: number) => `${e}억`,
+    fmtEokCheon: (e: number, c: number) => `${e}억 ${c}천`,
+    fmtMan: (n: string) => `${n}만`,
+  },
+} as const;
+
 export default function AptBattleClient() {
-  const { t } = useI18n();
+  const { locale } = useI18n();
+  const isKo = locale === "ko";
+  const t = isKo ? L.ko : L.en;
   const searchParams = useSearchParams();
 
-  // URL 파라미터로부터 초기값
   const urlA = searchParams.get("a");
   const urlB = searchParams.get("b");
 
@@ -71,7 +149,6 @@ export default function AptBattleClient() {
   const [result, setResult] = useState<BattleResult | null>(null);
   const [error, setError] = useState("");
 
-  // 랜덤 매칭
   const [randomSido, setRandomSido] = useState("");
   const [randomCode, setRandomCode] = useState("");
   const [isRandomLoading, setIsRandomLoading] = useState(false);
@@ -85,15 +162,14 @@ export default function AptBattleClient() {
     setError("");
     try {
       const res = await fetch(`${APT_SEARCH_URL}?lawdCd=${randomCode}&q=`);
-      if (!res.ok) throw new Error("검색 실패");
+      if (!res.ok) throw new Error(t.errSearch);
       const data = await res.json();
       const list = (data.results || []).filter(
-        (r: any) => r.txCount >= 2 // 거래 2건 이상만
+        (r: any) => r.txCount >= 2
       );
       if (list.length < 2) {
-        throw new Error("해당 지역에 비교할 아파트가 부족합니다. 다른 지역을 선택해주세요.");
+        throw new Error(t.errNotEnough);
       }
-      // 랜덤 2개 뽑기 (중복 방지)
       const shuffled = [...list].sort(() => Math.random() - 0.5);
       const regionName = getFullRegionName(randomCode);
       const pickA = shuffled[0];
@@ -113,13 +189,12 @@ export default function AptBattleClient() {
         regionName,
       });
     } catch (err: any) {
-      setError(err.message || "랜덤 매칭 실패");
+      setError(err.message || t.errRandom);
     } finally {
       setIsRandomLoading(false);
     }
-  }, [randomCode]);
+  }, [randomCode, t]);
 
-  // 배틀 시작
   const startBattle = useCallback(
     async (a: AptSelection, b: AptSelection, y: number) => {
       setError("");
@@ -127,24 +202,23 @@ export default function AptBattleClient() {
       try {
         const url = `${APT_BATTLE_URL}?lawdCdA=${a.lawdCd}&aptA=${encodeURIComponent(a.name)}&areaA=${a.area}&lawdCdB=${b.lawdCd}&aptB=${encodeURIComponent(b.name)}&areaB=${b.area}&years=${y}`;
         const res = await fetch(url);
-        if (!res.ok) throw new Error("데이터를 불러올 수 없습니다");
+        if (!res.ok) throw new Error(t.errLoad);
         const data = await res.json();
         if (
           (!data.a?.prices?.length && !data.b?.prices?.length)
         ) {
-          throw new Error("실거래 데이터가 없습니다. 다른 아파트를 선택해주세요.");
+          throw new Error(t.errNoData);
         }
         setResult(data);
         setPhase("animating");
       } catch (err: any) {
-        setError(err.message || "오류가 발생했습니다");
+        setError(err.message || t.errGeneric);
         setPhase("input");
       }
     },
-    []
+    [t]
   );
 
-  // URL 파라미터 자동 배틀
   const autoStarted = useMemo(() => {
     if (urlA && urlB && aptA && aptB && phase === "input") {
       startBattle(aptA, aptB, years);
@@ -156,7 +230,6 @@ export default function AptBattleClient() {
 
   const handleAnimComplete = useCallback(() => setPhase("result"), []);
 
-  // 공유 링크
   const shareUrl = useMemo(() => {
     if (!aptA || !aptB) return "";
     return `${SITE_URL}/ab?a=${encodeURIComponent(aptA.name)}&la=${aptA.lawdCd}&aa=${aptA.area}&b=${encodeURIComponent(aptB.name)}&lb=${aptB.lawdCd}&ab=${aptB.area}`;
@@ -167,30 +240,33 @@ export default function AptBattleClient() {
     try {
       if (navigator.share) {
         await navigator.share({
-          title: `${aptA?.name} vs ${aptB?.name} - 아파트 배틀`,
-          text: `${aptA?.name} vs ${aptB?.name} 어디가 더 올랐을까? 🏠`,
+          title: t.shareTitle(aptA?.name || "", aptB?.name || ""),
+          text: t.shareText(aptA?.name || "", aptB?.name || ""),
           url: shareUrl,
         });
       } else {
         await navigator.clipboard.writeText(shareUrl);
-        alert("링크가 복사되었습니다!");
+        alert(t.linkCopied);
       }
     } catch { /* user cancelled */ }
-  }, [shareUrl, aptA, aptB]);
+  }, [shareUrl, aptA, aptB, t]);
 
   const resetBattle = () => {
     setPhase("input");
     setResult(null);
   };
 
-  // 결과 계산
   const fmtPrice = (manwon: number) => {
     if (manwon >= 10000) {
       const eok = Math.floor(manwon / 10000);
       const rest = manwon % 10000;
-      return rest > 0 ? `${eok}억 ${Math.round(rest / 1000) * 1000 >= 1000 ? Math.round(rest / 1000) + "천" : rest}만` : `${eok}억`;
+      if (rest > 0) {
+        const cheon = Math.round(rest / 1000);
+        return cheon >= 1 ? t.fmtEokCheon(eok, cheon) : t.fmtMan(rest.toString());
+      }
+      return t.fmtEok(eok);
     }
-    return `${manwon.toLocaleString()}만`;
+    return t.fmtMan(manwon.toLocaleString());
   };
 
   const summaryA = useMemo(() => {
@@ -216,7 +292,6 @@ export default function AptBattleClient() {
     return "draw";
   }, [summaryA, summaryB]);
 
-  // ── 애니메이션 ──
   if (phase === "animating" && result) {
     return (
       <AptBattleAnimation
@@ -231,26 +306,21 @@ export default function AptBattleClient() {
 
   return (
     <div className="max-w-lg mx-auto space-y-5">
-      {/* 헤더 */}
       <div className="text-center space-y-1">
         <div className="inline-flex items-center gap-2 bg-emerald-50 px-4 py-1.5 rounded-full">
           <Building2 className="h-4 w-4 text-emerald-600" />
-          <span className="text-sm font-bold text-emerald-700">아파트 배틀</span>
+          <span className="text-sm font-bold text-emerald-700">{t.badge}</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          전국 아파트 실거래가로 평당가 상승률 대결!
-        </p>
+        <p className="text-xs text-muted-foreground">{t.subtitle}</p>
       </div>
 
-      {/* ── 입력 / 로딩 ── */}
       {(phase === "input" || phase === "loading") && (
         <>
-          {/* 랜덤 매칭 */}
           <div className="rounded-xl border bg-gradient-to-br from-amber-50 to-orange-50 p-3.5 space-y-2.5">
             <div className="flex items-center gap-2">
               <Dice5 className="h-4 w-4 text-amber-600" />
-              <span className="text-xs font-bold text-amber-800">랜덤 매칭</span>
-              <span className="text-[10px] text-amber-600/70">같은 구에서 랜덤 2개!</span>
+              <span className="text-xs font-bold text-amber-800">{t.randomTitle}</span>
+              <span className="text-[10px] text-amber-600/70">{t.randomDesc}</span>
             </div>
             <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
               <div className="relative">
@@ -259,7 +329,7 @@ export default function AptBattleClient() {
                   onChange={(e) => { setRandomSido(e.target.value); setRandomCode(""); }}
                   className="w-full h-9 rounded-lg border bg-white px-2.5 text-xs appearance-none cursor-pointer pr-7"
                 >
-                  <option value="">시/도</option>
+                  <option value="">{t.sido}</option>
                   {sidoList.map((s) => (
                     <option key={s} value={s}>
                       {s.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, "")}
@@ -275,7 +345,7 @@ export default function AptBattleClient() {
                   disabled={!randomSido}
                   className="w-full h-9 rounded-lg border bg-white px-2.5 text-xs appearance-none cursor-pointer pr-7 disabled:opacity-50"
                 >
-                  <option value="">시/군/구</option>
+                  <option value="">{t.sigungu}</option>
                   {sigunguList.map((sg) => (
                     <option key={sg.code} value={sg.code}>{sg.name}</option>
                   ))}
@@ -292,44 +362,39 @@ export default function AptBattleClient() {
                 ) : (
                   <Dice5 className="h-3.5 w-3.5" />
                 )}
-                뽑기
+                {t.draw}
               </button>
             </div>
           </div>
 
-          {/* 또는 구분선 */}
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-zinc-200" />
-            <span className="text-[10px] text-muted-foreground font-medium">또는 직접 선택</span>
+            <span className="text-[10px] text-muted-foreground font-medium">{t.orDirect}</span>
             <div className="flex-1 h-px bg-zinc-200" />
           </div>
 
           <div className="space-y-4">
-            {/* A */}
             <AptSearch
               value={aptA}
               onChange={setAptA}
-              label="🏠 아파트 A"
+              label={t.labelA}
               color="#059669"
             />
-            {/* B */}
             <AptSearch
               value={aptB}
               onChange={setAptB}
-              label="🏠 아파트 B"
+              label={t.labelB}
               color="#7c3aed"
             />
 
-            {/* 동일 아파트 경고 */}
             {aptA && aptB && aptA.lawdCd === aptB.lawdCd && aptA.name === aptB.name && aptA.area === aptB.area && (
               <p className="text-xs text-amber-600 text-center font-medium">
-                ⚠️ 같은 아파트끼리는 비교할 수 없어요. 다른 아파트를 선택해주세요.
+                {t.sameWarn}
               </p>
             )}
 
-            {/* 기간 선택 */}
             <div className="flex items-center gap-2 justify-center">
-              <span className="text-xs text-muted-foreground">비교 기간</span>
+              <span className="text-xs text-muted-foreground">{t.period}</span>
               {YEAR_OPTIONS.map((y) => (
                 <button
                   key={y}
@@ -340,7 +405,7 @@ export default function AptBattleClient() {
                       : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
                   }`}
                 >
-                  {y}년
+                  {y}{t.yearSuffix}
                 </button>
               ))}
             </div>
@@ -349,7 +414,6 @@ export default function AptBattleClient() {
               <p className="text-xs text-red-500 text-center">{error}</p>
             )}
 
-            {/* 배틀 시작 버튼 */}
             <Button
               onClick={() => aptA && aptB && startBattle(aptA, aptB, years)}
               disabled={!aptA || !aptB || phase === "loading" || (aptA?.lawdCd === aptB?.lawdCd && aptA?.name === aptB?.name && aptA?.area === aptB?.area)}
@@ -358,12 +422,12 @@ export default function AptBattleClient() {
               {phase === "loading" ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  데이터 불러오는 중...
+                  {t.loading}
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <Swords className="h-5 w-5" />
-                  배틀 시작!
+                  {t.startBattle}
                 </span>
               )}
             </Button>
@@ -371,27 +435,23 @@ export default function AptBattleClient() {
         </>
       )}
 
-      {/* ── 결과 ── */}
       {phase === "result" && result && (
         <div className="space-y-4 animate-in fade-in-0 slide-in-from-bottom-4 duration-500">
-          {/* 승자 배너 */}
           {winner && winner !== "draw" && (
             <div className="flex items-center justify-center gap-2 py-3">
               <Trophy className="h-6 w-6 text-yellow-500" />
               <span className="text-lg font-black">
-                {winner === "A" ? result.a.name : result.b.name} 승리!
+                {t.win(winner === "A" ? result.a.name : result.b.name)}
               </span>
             </div>
           )}
           {winner === "draw" && (
             <div className="text-center py-3">
-              <span className="text-lg font-black">무승부! ⚖️</span>
+              <span className="text-lg font-black">{t.drawResult}</span>
             </div>
           )}
 
-          {/* 카드 비교 */}
           <div className="grid grid-cols-2 gap-3">
-            {/* A */}
             <div
               className={`rounded-xl border p-3 space-y-1.5 ${
                 winner === "A" ? "ring-2 ring-emerald-500 bg-emerald-50/50" : "bg-white"
@@ -415,12 +475,12 @@ export default function AptBattleClient() {
                   </p>
                   <div className="space-y-0.5">
                     <p className="text-[10px] text-muted-foreground">
-                      평당 {Math.round(summaryA.first.pricePerPyeong).toLocaleString()}만
+                      {t.perPyeong} {Math.round(summaryA.first.pricePerPyeong).toLocaleString()}{t.man}
                       <ArrowRight className="inline h-3 w-3 mx-0.5" />
-                      {Math.round(summaryA.last.pricePerPyeong).toLocaleString()}만
+                      {Math.round(summaryA.last.pricePerPyeong).toLocaleString()}{t.man}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      매매 {fmtPrice(summaryA.first.price)}
+                      {t.trade} {fmtPrice(summaryA.first.price)}
                       <ArrowRight className="inline h-3 w-3 mx-0.5" />
                       {fmtPrice(summaryA.last.price)}
                     </p>
@@ -429,7 +489,6 @@ export default function AptBattleClient() {
               )}
             </div>
 
-            {/* B */}
             <div
               className={`rounded-xl border p-3 space-y-1.5 ${
                 winner === "B" ? "ring-2 ring-violet-500 bg-violet-50/50" : "bg-white"
@@ -453,12 +512,12 @@ export default function AptBattleClient() {
                   </p>
                   <div className="space-y-0.5">
                     <p className="text-[10px] text-muted-foreground">
-                      평당 {Math.round(summaryB.first.pricePerPyeong).toLocaleString()}만
+                      {t.perPyeong} {Math.round(summaryB.first.pricePerPyeong).toLocaleString()}{t.man}
                       <ArrowRight className="inline h-3 w-3 mx-0.5" />
-                      {Math.round(summaryB.last.pricePerPyeong).toLocaleString()}만
+                      {Math.round(summaryB.last.pricePerPyeong).toLocaleString()}{t.man}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      매매 {fmtPrice(summaryB.first.price)}
+                      {t.trade} {fmtPrice(summaryB.first.price)}
                       <ArrowRight className="inline h-3 w-3 mx-0.5" />
                       {fmtPrice(summaryB.last.price)}
                     </p>
@@ -468,10 +527,9 @@ export default function AptBattleClient() {
             </div>
           </div>
 
-          {/* 차트 */}
           {result.a.prices.length > 0 && result.b.prices.length > 0 && (
             <div className="bg-white rounded-xl border p-3">
-              <h3 className="text-xs font-bold mb-2">📈 평당가 추이</h3>
+              <h3 className="text-xs font-bold mb-2">{t.chartTitle}</h3>
               <AptBattleChart
                 nameA={result.a.name}
                 nameB={result.b.name}
@@ -481,7 +539,6 @@ export default function AptBattleClient() {
             </div>
           )}
 
-          {/* 액션 버튼 */}
           <div className="flex gap-2">
             <Button
               onClick={handleShare}
@@ -489,14 +546,14 @@ export default function AptBattleClient() {
               className="flex-1 h-11 rounded-xl text-sm font-bold"
             >
               <Share2 className="h-4 w-4 mr-1.5" />
-              공유하기
+              {t.shareBtn}
             </Button>
             <Button
               onClick={resetBattle}
               className="flex-1 h-11 rounded-xl text-sm font-bold bg-zinc-900"
             >
               <Swords className="h-4 w-4 mr-1.5" />
-              다시 배틀
+              {t.again}
             </Button>
           </div>
         </div>

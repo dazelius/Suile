@@ -10,10 +10,34 @@ import {
   ReferenceLine,
 } from "recharts";
 import { Trophy, TrendingUp, TrendingDown } from "lucide-react";
+import { useI18n } from "@/components/i18n/I18nProvider";
 
 interface PricePoint { date: string; price: number; pricePerPyeong: number; floor?: string; }
 interface AptData { name: string; area: number; lawdCd: string; prices: PricePoint[]; }
 interface Props { dataA: AptData; dataB: AptData; regionA: string; regionB: string; onComplete: () => void; }
+
+const L = {
+  ko: {
+    txCount: (n: number) => `${n}건`,
+    volume: "거래량",
+    perPyeong: "평당가",
+    man: "만",
+    trade: "매매",
+    win: (n: string) => `${n} 승리!`,
+    draw: "무승부!",
+    txLabel: (n: number) => `${n}건 거래`,
+  },
+  en: {
+    txCount: (n: number) => `${n} tx`,
+    volume: "Volume",
+    perPyeong: "Per py",
+    man: "M",
+    trade: "Price",
+    win: (n: string) => `${n} Wins!`,
+    draw: "It's a Tie!",
+    txLabel: (n: number) => `${n} trades`,
+  },
+} as const;
 
 function fmtPrice(n: number) {
   if (n >= 10000) { const e = Math.floor(n / 10000), r = Math.round((n % 10000) / 1000); return r > 0 ? `${e}억${r}천` : `${e}억`; }
@@ -43,6 +67,9 @@ function build(a: AptData, b: AptData) {
 }
 
 export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete }: Props) {
+  const { locale } = useI18n();
+  const t = locale === "ko" ? L.ko : L.en;
+
   const { rows, evs } = useRef(build(dataA, dataB)).current;
   const total = rows.length;
 
@@ -50,10 +77,9 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
   const [showWinner, setShowWinner] = useState(false);
   const animRef = useRef(0);
 
-  // 15초 동안 처음부터 끝까지 선형 재생
   useEffect(() => {
     if (total <= 1) { setShowWinner(true); setTimeout(onComplete, 1500); return; }
-    const DURATION = 15000; // 15초
+    const DURATION = 15000;
     const start = performance.now();
 
     const tick = (now: number) => {
@@ -81,11 +107,9 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
   const txTotal = cA + cB || 1;
   const txBarA = Math.max(5, (cA / txTotal) * 100);
 
-  // 현재 시점 년도
   const curDate = cur?.date ?? "";
   const displayDate = curDate ? `${curDate.substring(0, 4)}.${curDate.substring(5, 7)}` : "";
 
-  // 최종 결과
   const lastRow = rows[total - 1];
   const winA = (lastRow?.retA ?? 0) > (lastRow?.retB ?? 0);
   const winB = (lastRow?.retB ?? 0) > (lastRow?.retA ?? 0);
@@ -93,12 +117,10 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
 
   return (
     <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col">
-      {/* 프로그레스 */}
       <div className="h-0.5 bg-zinc-800">
         <div className="h-full bg-gradient-to-r from-emerald-500 to-violet-500 transition-all duration-75" style={{ width: `${(progress / total) * 100}%` }} />
       </div>
 
-      {/* 상단: 이름 + 수익률 */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center px-3 pt-2.5 pb-1">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-bold text-base shrink-0">
@@ -111,7 +133,6 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
             </p>
           </div>
         </div>
-        {/* 시간 */}
         <div className="text-center shrink-0 px-2">
           <p className="text-zinc-400 text-lg font-mono font-bold tabular-nums">{displayDate}</p>
         </div>
@@ -128,12 +149,11 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
         </div>
       </div>
 
-      {/* 거래량 바 */}
       <div className="px-3 space-y-0.5">
         <div className="flex justify-between text-[9px] text-zinc-500 px-0.5">
-          <span>{cA}건</span>
-          <span className="text-zinc-600">거래량</span>
-          <span>{cB}건</span>
+          <span>{t.txCount(cA)}</span>
+          <span className="text-zinc-600">{t.volume}</span>
+          <span>{t.txCount(cB)}</span>
         </div>
         <div className="h-3 rounded-full overflow-hidden bg-zinc-800/50 flex">
           <div className="h-full bg-emerald-600/70 transition-all duration-150 ease-out" style={{ width: `${txBarA}%` }} />
@@ -141,7 +161,6 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
         </div>
       </div>
 
-      {/* 차트 */}
       <div className="flex-1 px-1 pt-2 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={vis} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
@@ -154,27 +173,25 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
         </ResponsiveContainer>
       </div>
 
-      {/* 하단: 평당가 + 매매가 */}
       <div className="grid grid-cols-2 gap-2 px-3 pb-3 pt-1">
         <div className="bg-zinc-900/80 rounded-xl p-2 border border-emerald-900/20">
-          <p className="text-[9px] text-emerald-400/70 font-medium">평당가</p>
-          <p className="text-white text-base font-black">{fmtPP(cur?.ppA ?? 0)}<span className="text-[9px] text-zinc-600">만</span></p>
-          <p className="text-zinc-600 text-[9px]">매매 {fmtPrice(cur?.priceA ?? 0)}</p>
+          <p className="text-[9px] text-emerald-400/70 font-medium">{t.perPyeong}</p>
+          <p className="text-white text-base font-black">{fmtPP(cur?.ppA ?? 0)}<span className="text-[9px] text-zinc-600">{t.man}</span></p>
+          <p className="text-zinc-600 text-[9px]">{t.trade} {fmtPrice(cur?.priceA ?? 0)}</p>
         </div>
         <div className="bg-zinc-900/80 rounded-xl p-2 border border-violet-900/20">
-          <p className="text-[9px] text-violet-400/70 font-medium">평당가</p>
-          <p className="text-white text-base font-black">{fmtPP(cur?.ppB ?? 0)}<span className="text-[9px] text-zinc-600">만</span></p>
-          <p className="text-zinc-600 text-[9px]">매매 {fmtPrice(cur?.priceB ?? 0)}</p>
+          <p className="text-[9px] text-violet-400/70 font-medium">{t.perPyeong}</p>
+          <p className="text-white text-base font-black">{fmtPP(cur?.ppB ?? 0)}<span className="text-[9px] text-zinc-600">{t.man}</span></p>
+          <p className="text-zinc-600 text-[9px]">{t.trade} {fmtPrice(cur?.priceB ?? 0)}</p>
         </div>
       </div>
 
-      {/* 승자 오버레이 */}
       {showWinner && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/75 animate-in fade-in-0 duration-500">
           <div className="text-center space-y-4 px-6">
             <Trophy className="h-12 w-12 text-yellow-400 mx-auto animate-bounce" />
             <p className="text-white text-xl font-black">
-              {winnerName ? `${winnerName} 승리!` : "무승부!"}
+              {winnerName ? t.win(winnerName) : t.draw}
             </p>
             <div className="flex items-end justify-center gap-5">
               <div className="text-center">
@@ -183,7 +200,7 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
                   {(lastRow?.retA ?? 0) >= 0 ? "+" : ""}{(lastRow?.retA ?? 0).toFixed(1)}%
                 </p>
                 <p className="text-zinc-500 text-[10px] mt-0.5">{fmtPrice(lastRow?.priceA ?? 0)}</p>
-                <p className="text-zinc-600 text-[9px]">{lastRow?.cumA ?? 0}건 거래</p>
+                <p className="text-zinc-600 text-[9px]">{t.txLabel(lastRow?.cumA ?? 0)}</p>
               </div>
               <p className="text-zinc-600 text-lg font-bold pb-3">vs</p>
               <div className="text-center">
@@ -192,7 +209,7 @@ export function AptBattleAnimation({ dataA, dataB, regionA, regionB, onComplete 
                   {(lastRow?.retB ?? 0) >= 0 ? "+" : ""}{(lastRow?.retB ?? 0).toFixed(1)}%
                 </p>
                 <p className="text-zinc-500 text-[10px] mt-0.5">{fmtPrice(lastRow?.priceB ?? 0)}</p>
-                <p className="text-zinc-600 text-[9px]">{lastRow?.cumB ?? 0}건 거래</p>
+                <p className="text-zinc-600 text-[9px]">{t.txLabel(lastRow?.cumB ?? 0)}</p>
               </div>
             </div>
           </div>

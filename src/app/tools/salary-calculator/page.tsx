@@ -38,6 +38,9 @@ export const metadata: Metadata = {
       "2026년 확정 요율 기준! 연봉에서 4대보험·소득세 공제 후 실수령액을 정확히 계산합니다.",
     images: [`${siteConfig.url}/og-image.png`],
   },
+  alternates: {
+    canonical: `${siteConfig.url}/tools/salary-calculator`,
+  },
 };
 
 export default function SalaryCalculatorPage() {

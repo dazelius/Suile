@@ -35,6 +35,9 @@ export const metadata: Metadata = {
     description: "AI가 당신의 얼굴을 정밀 분석! 점수, 나이, 닮은 연예인까지",
     images: [`${siteConfig.url}/face-score-og.png`],
   },
+  alternates: {
+    canonical: `${siteConfig.url}/tools/face-score`,
+  },
 };
 
 export default function FaceScorePage() {

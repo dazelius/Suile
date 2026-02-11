@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
+import { useI18n } from "@/components/i18n/I18nProvider";
 
 interface PricePoint {
   date: string;
@@ -24,8 +25,23 @@ interface AptBattleChartProps {
   pricesB: PricePoint[];
 }
 
+const L = {
+  ko: {
+    perPyeong: (v: string) => `평당 ${v}만`,
+    eok: (v: string) => `(${v}억)`,
+    footnote: "* 평당가 = 매매가 / (전용면적 ÷ 3.3m²), 분기별 평균",
+  },
+  en: {
+    perPyeong: (v: string) => `${v}M/py`,
+    eok: (v: string) => `(${v}억)`,
+    footnote: "* Price per pyeong = Sale price / (Area ÷ 3.3m²), quarterly avg",
+  },
+} as const;
+
 export function AptBattleChart({ nameA, nameB, pricesA, pricesB }: AptBattleChartProps) {
-  // 개별 거래건을 시간순 인터리브 → 최근가 방식으로 양쪽 다 표시
+  const { locale } = useI18n();
+  const t = locale === "ko" ? L.ko : L.en;
+
   const events: { date: string; side: "A" | "B"; pp: number; price: number }[] = [];
   for (const p of pricesA) events.push({ date: p.date, side: "A", pp: p.pricePerPyeong, price: p.price });
   for (const p of pricesB) events.push({ date: p.date, side: "B", pp: p.pricePerPyeong, price: p.price });
@@ -90,10 +106,10 @@ export function AptBattleChart({ nameA, nameB, pricesA, pricesB }: AptBattleChar
                           style={{ backgroundColor: entry.color }}
                         />
                         <span className="font-semibold">{name}</span>
-                        <span>평당 {Math.round(entry.value).toLocaleString()}만</span>
+                        <span>{t.perPyeong(Math.round(entry.value).toLocaleString())}</span>
                         {price && (
                           <span className="text-muted-foreground">
-                            ({(price / 10000).toFixed(1)}억)
+                            {t.eok((price / 10000).toFixed(1))}
                           </span>
                         )}
                       </div>
@@ -134,7 +150,7 @@ export function AptBattleChart({ nameA, nameB, pricesA, pricesB }: AptBattleChar
         </AreaChart>
       </ResponsiveContainer>
       <p className="text-[10px] text-center text-muted-foreground mt-1">
-        * 평당가 = 매매가 / (전용면적 ÷ 3.3m²), 분기별 평균
+        {t.footnote}
       </p>
     </div>
   );
