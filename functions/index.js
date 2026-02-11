@@ -40,3 +40,35 @@ const aptBattle = require("./apt-battle");
 exports.aptSearch = aptBattle.aptSearch;
 exports.aptBattle = aptBattle.aptBattle;
 exports.aptBattleView = aptBattle.aptBattleView;
+
+// ── 주식 성적표 ──
+const stockScore = require("./stock-score");
+exports.stockScore = stockScore.stockScore;
+exports.stockScoreView = stockScore.stockScoreView;
+
+// ── 주식 AI 분석 ──
+const stockAi = require("./stock-ai");
+exports.stockAiAnalysis = stockAi.stockAiAnalysis;
+
+// ── 얼굴 평가 ──
+const faceScore = require("./face-score");
+exports.faceScore = faceScore.faceScore;
+exports.faceScoreOg = faceScore.faceScoreOg;
+exports.faceScoreView = faceScore.faceScoreView;
+
+// ── 심박수 측정기 ──
+const heartRate = require("./heart-rate");
+exports.heartRateOg = heartRate.heartRateOg;
+exports.heartRateView = heartRate.heartRateView;
+
+// ── 회의록 AI 정리 ──
+const meetingNote = require("./meeting-note");
+exports.meetingAi = meetingNote.meetingAi;
+
+// ── 회의록 Google Docs 내보내기 ──
+const exportGoogleDoc = require("./export-google-doc");
+exports.exportGoogleDoc = exportGoogleDoc.exportGoogleDoc;
+
+// ── 음성 파일 전사 ──
+const transcribeAudio = require("./transcribe-audio");
+exports.transcribeAudio = transcribeAudio.transcribeAudio;

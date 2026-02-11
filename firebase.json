@@ -69,6 +69,61 @@
         "source": "/ab",
         "function": "aptBattleView",
         "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/stockScore",
+        "function": "stockScore",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/ss",
+        "function": "stockScoreView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/stockAi",
+        "function": "stockAiAnalysis",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/faceScore",
+        "function": "faceScore",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/fs",
+        "function": "faceScoreView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/faceScoreOg",
+        "function": "faceScoreOg",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/hr",
+        "function": "heartRateView",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/heartRateOg",
+        "function": "heartRateOg",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/meetingAi",
+        "function": "meetingAi",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/exportGoogleDoc",
+        "function": "exportGoogleDoc",
+        "region": "asia-northeast3"
+      },
+      {
+        "source": "/api/transcribeAudio",
+        "function": "transcribeAudio",
+        "region": "asia-northeast3"
       }
     ],
     "headers": [

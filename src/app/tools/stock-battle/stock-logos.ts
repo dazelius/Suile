@@ -49,23 +49,32 @@ const LOGO_DOMAINS: Record<string, string> = {
 
 /**
  * 로고 URL 후보 배열 반환 (순서대로 시도)
- * 1. Google 고화질 favicon
- * 2. DuckDuckGo 아이콘
+ * 1. (매핑된 경우) Google 고화질 favicon
+ * 2. (매핑된 경우) DuckDuckGo 아이콘
+ * 3. (범용) Parqet 로고 API — 티커만으로 조회 가능
+ * 4. (범용) Logo.dev / Synth Finance 로고 API
  */
 export function getLogoUrls(ticker: string): string[] {
+  const urls: string[] = [];
   const domain = LOGO_DOMAINS[ticker];
-  if (!domain) return [];
-  return [
-    // Google's favicon service (고화질, 항상 작동)
-    `https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${domain}&size=128`,
-    // DuckDuckGo 아이콘 (백업)
-    `https://icons.duckduckgo.com/ip3/${domain}.ico`,
-  ];
+  if (domain) {
+    urls.push(
+      `https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${domain}&size=128`,
+      `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+    );
+  }
+  // 범용 폴백: 티커 기반 로고 서비스 (매핑 없어도 시도)
+  const cleanTicker = ticker.replace("-", "."); // BRK-B → BRK.B
+  urls.push(
+    `https://assets.parqet.com/logos/symbol/${cleanTicker}`,
+    `https://img.logo.dev/ticker/${cleanTicker}?token=pk_anonymous`,
+  );
+  return urls;
 }
 
-/** 로고 유무 확인 */
+/** 로고 유무 확인 (범용 폴백이 있으므로 항상 true) */
 export function hasLogo(ticker: string): boolean {
-  return !!LOGO_DOMAINS[ticker];
+  return !!ticker;
 }
 
 /** 티커 기반 고유 색상 생성 (폴백 아바타용) */

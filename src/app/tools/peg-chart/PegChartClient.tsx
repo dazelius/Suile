@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Plus, Loader2, X, BarChart3, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TickerSearch } from "../stock-battle/TickerSearch";
 import { StockLogo } from "../stock-battle/StockLogo";
 import { PegLineChart } from "./PegLineChart";
 import { useI18n } from "@/components/i18n/I18nProvider";
+import { useSearchParams } from "next/navigation";
 
 const API_URL =
   "https://asia-northeast3-suile-21173.cloudfunctions.net/pegHistory";
@@ -28,6 +29,9 @@ type ViewState = "input" | "loading" | "result";
 
 export function PegChartClient() {
   const { t, locale } = useI18n();
+  const searchParams = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "1";
+  const urlTickers = searchParams.get("tickers");
 
   // 선택된 종목 (최대 5개)
   const [selected, setSelected] = useState<SelectedTicker[]>([]);
@@ -38,6 +42,7 @@ export function PegChartClient() {
   const [chartData, setChartData] = useState<Record<string, TickerData> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const [autoLoaded, setAutoLoaded] = useState(false);
 
   // 종목 추가
   const addTicker = useCallback(
@@ -98,12 +103,62 @@ export function PegChartClient() {
     }
   }, [selected, locale]);
 
+  // URL 파라미터로 자동 로드 (embed 또는 tickers 파라미터)
+  useEffect(() => {
+    if (autoLoaded || !urlTickers) return;
+    const tickers = urlTickers.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean).slice(0, 5);
+    if (tickers.length === 0) return;
+    setAutoLoaded(true);
+    const items = tickers.map((t) => ({ ticker: t, name: t }));
+    setSelected(items);
+    // 다음 틱에서 fetch 실행
+    setTimeout(() => {
+      (async () => {
+        setViewState("loading");
+        setError(null);
+        try {
+          const params = tickers.map((t) => `tickers=${encodeURIComponent(t)}`).join("&");
+          const res = await fetch(`${API_URL}?${params}&lang=${locale}`);
+          if (!res.ok) throw new Error("PEG 데이터 조회 실패");
+          const data = await res.json();
+          setChartData(data.tickers);
+          setViewState("result");
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : "오류");
+          setViewState("input");
+        }
+      })();
+    }, 100);
+  }, [urlTickers, autoLoaded, locale]);
+
   // 뒤로가기
   const handleReset = () => {
     setViewState("input");
     setChartData(null);
     setError(null);
   };
+
+  // embed 모드: 차트만 표시
+  if (isEmbed) {
+    if (viewState === "loading") {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 text-violet-500 animate-spin" />
+        </div>
+      );
+    }
+    if (viewState === "result" && chartData) {
+      return (
+        <div className="p-2">
+          <PegLineChart tickers={chartData} locale={locale} />
+        </div>
+      );
+    }
+    if (error) {
+      return <div className="text-center text-xs text-red-500 py-4">{error}</div>;
+    }
+    return <div className="text-center text-xs text-zinc-400 py-4">데이터 로드 중...</div>;
+  }
 
   return (
     <div className="max-w-xl mx-auto space-y-5">

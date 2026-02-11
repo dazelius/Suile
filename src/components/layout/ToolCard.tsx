@@ -9,11 +9,16 @@ import {
   ArrowLeftRight,
   Wand2,
   Heart,
+  HeartPulse,
   Code,
   MessageCircle,
   Lock,
   TrendingUp,
   Building2,
+  Award,
+  Smile,
+  Mic,
+  Wallet,
   ChevronRight,
   LucideIcon,
 } from "lucide-react";
@@ -36,6 +41,11 @@ const iconMap: Record<string, LucideIcon> = {
   Lock,
   TrendingUp,
   Building2,
+  Award,
+  Smile,
+  HeartPulse,
+  Mic,
+  Wallet,
 };
 
 interface ToolCardProps {

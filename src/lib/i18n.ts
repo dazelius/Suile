@@ -67,6 +67,26 @@ export interface Translations {
   toolAptBattleName: string;
   toolAptBattleDesc: string;
 
+  // ── 주식 성적표 ──
+  toolStockScoreName: string;
+  toolStockScoreDesc: string;
+
+  // ── 얼굴 평가 ──
+  toolFaceScoreName: string;
+  toolFaceScoreDesc: string;
+
+  // ── 회의록 AI 정리 ──
+  toolMeetingNoteName: string;
+  toolMeetingNoteDesc: string;
+
+  // ── 심박수 측정기 ──
+  toolHeartRateName: string;
+  toolHeartRateDesc: string;
+
+  // ── 연봉 실수령액 계산기 ──
+  toolSalaryCalcName: string;
+  toolSalaryCalcDesc: string;
+
   // ── QR 비밀 메시지 도구 ──
   toolQrName: string;
   toolQrDesc: string;
@@ -225,6 +245,21 @@ const ko: Translations = {
   toolAptBattleName: "아파트 배틀",
   toolAptBattleDesc: "전국 아파트 실거래가로 평당가 상승률 대결!",
 
+  toolStockScoreName: "주식 성적표",
+  toolStockScoreDesc: "S&P 500 전 종목 자동 채점! 100점 만점 투자 성적표",
+
+  toolFaceScoreName: "AI 얼굴 평가",
+  toolFaceScoreDesc: "AI가 당신의 얼굴을 정밀 분석! 점수, 나이, 닮은 연예인까지",
+
+  toolMeetingNoteName: "회의록 AI 정리",
+  toolMeetingNoteDesc: "녹음 → 텍스트 변환 → AI 자동 정리! 회의록을 한번에",
+
+  toolHeartRateName: "심박수 측정기",
+  toolHeartRateDesc: "카메라에 손가락을 대면 심박수를 실시간 측정합니다",
+
+  toolSalaryCalcName: "연봉 실수령액 계산기",
+  toolSalaryCalcDesc: "2026년 확정 요율 기준 연봉 실수령액을 정확하게 계산합니다",
+
   toolQrName: "블라인드 메시지",
   toolQrDesc: "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있어요.",
   toolQrTitle: "블라인드 메시지",
@@ -379,6 +414,21 @@ const en: Translations = {
 
   toolAptBattleName: "Apartment Battle",
   toolAptBattleDesc: "Compare apartment price changes using real transaction data!",
+
+  toolStockScoreName: "Stock Report Card",
+  toolStockScoreDesc: "Auto-grade all S&P 500 stocks! 100-point investment score",
+
+  toolFaceScoreName: "AI Face Score",
+  toolFaceScoreDesc: "AI analyzes your face! Score, age, celebrity lookalike and more",
+
+  toolMeetingNoteName: "Meeting Notes AI",
+  toolMeetingNoteDesc: "Record → Transcribe → AI organizes your meeting notes automatically",
+
+  toolHeartRateName: "Heart Rate Monitor",
+  toolHeartRateDesc: "Measure your heart rate with your phone camera using PPG technology",
+
+  toolSalaryCalcName: "Salary Take-Home Calculator",
+  toolSalaryCalcDesc: "Calculate your exact take-home pay based on 2026 Korean tax rates",
 
   toolQrName: "Blind Message",
   toolQrDesc: "Send a secret message. Only the recipient can open it.",
