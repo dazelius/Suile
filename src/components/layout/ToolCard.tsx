@@ -19,6 +19,7 @@ import {
   Smile,
   Mic,
   Wallet,
+  Swords,
   ChevronRight,
   LucideIcon,
 } from "lucide-react";
@@ -46,6 +47,7 @@ const iconMap: Record<string, LucideIcon> = {
   HeartPulse,
   Mic,
   Wallet,
+  Swords,
 };
 
 interface ToolCardProps {

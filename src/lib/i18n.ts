@@ -70,6 +70,9 @@ export interface Translations {
   // ── 주식 성적표 ──
   toolStockScoreName: string;
   toolStockScoreDesc: string;
+  // ── 주식 배틀로얄 ──
+  toolStockRoyaleName: string;
+  toolStockRoyaleDesc: string;
 
   // ── 얼굴 평가 ──
   toolFaceScoreName: string;
@@ -247,6 +250,8 @@ const ko: Translations = {
 
   toolStockScoreName: "주식 성적표",
   toolStockScoreDesc: "S&P 500 전 종목 자동 채점! 100점 만점 투자 성적표",
+  toolStockRoyaleName: "주식 배틀로얄",
+  toolStockRoyaleDesc: "주식 데이터를 RPG 스탯으로! 8개 종목의 배틀로얄",
 
   toolFaceScoreName: "AI 얼굴 평가",
   toolFaceScoreDesc: "AI가 당신의 얼굴을 정밀 분석! 점수, 나이, 닮은 연예인까지",
@@ -417,6 +422,8 @@ const en: Translations = {
 
   toolStockScoreName: "Stock Report Card",
   toolStockScoreDesc: "Auto-grade all S&P 500 stocks! 100-point investment score",
+  toolStockRoyaleName: "Stock Battle Royale",
+  toolStockRoyaleDesc: "Stock data as RPG stats! 8-stock battle royale",
 
   toolFaceScoreName: "AI Face Score",
   toolFaceScoreDesc: "AI analyzes your face! Score, age, celebrity lookalike and more",
