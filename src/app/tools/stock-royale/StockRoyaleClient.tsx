@@ -81,8 +81,15 @@ function clamp(v: number, mn: number, mx: number) {
   return Math.max(mn, Math.min(mx, v));
 }
 
+// Korean tickers are 6-digit numbers (e.g. "005930"); market cap from Yahoo is in KRW
+const KRW_USD = 1400; // approximate exchange rate
+function isKrTicker(ticker: string) { return /^\d{6}$/.test(ticker); }
+
 function toGameStats(d: Record<string, unknown>): GameStats {
-  const mc = (d.marketCap as number) ?? 1e9;
+  let mc = (d.marketCap as number) ?? 1e9;
+  // Convert KRW market cap to USD for fair comparison
+  const ticker = (d.ticker as string) ?? "";
+  if (isKrTicker(ticker) && mc > 1e12) mc = mc / KRW_USD;
   // Power-law (mc^0.3): preserves market cap hierarchy far better than log10
   // e.g. $1B→600 HP, $85B(Hynix)→1900, $1.5T(Meta)→4500, $3T(Apple)→5500
   const raw = Math.pow(mc, 0.3);
@@ -1084,7 +1091,9 @@ export default function StockRoyaleClient() {
           const d = r.value as Record<string, unknown>;
           const stats = toGameStats(d);
           const cls = getClass(stats, isKo);
-          const mcap = (d.marketCap as number) ?? 0;
+          let mcap = (d.marketCap as number) ?? 0;
+          const tk = (d.ticker as string) ?? tickers[i];
+          if (isKrTicker(tk) && mcap > 1e12) mcap = mcap / KRW_USD;
           const mcapLabel = mcap >= 1e12 ? `$${(mcap / 1e12).toFixed(1)}T` : mcap >= 1e9 ? `$${(mcap / 1e9).toFixed(0)}B` : `$${(mcap / 1e6).toFixed(0)}M`;
           const betaVal = (d.beta as number) ?? 1.0;
           const divYieldPct = ((d.divYield as number) ?? 0) * 100;
