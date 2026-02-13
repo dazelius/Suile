@@ -23,6 +23,8 @@ export interface ChannelData {
   // Derived
   avgViewsPerVideo: number;
   yearsActive: number;
+  // Topic / category
+  topicIds: string[];        // e.g. ["/m/04rlf", "/m/02jjt"]
 }
 
 export interface ChannelSearchResult {
@@ -51,7 +53,7 @@ export async function fetchChannelData(
 
   for (const batch of batches) {
     const ids = batch.join(",");
-    const url = `${BASE}/channels?part=snippet,statistics&id=${ids}&key=${API_KEY}`;
+    const url = `${BASE}/channels?part=snippet,statistics,topicDetails&id=${ids}&key=${API_KEY}`;
 
     try {
       const res = await fetch(url);
@@ -65,6 +67,7 @@ export async function fetchChannelData(
       for (const item of (data.items ?? []) as any[]) {
         const stats = item.statistics ?? {};
         const snippet = item.snippet ?? {};
+        const topic = item.topicDetails ?? {};
         const subs = parseInt(stats.subscriberCount ?? "0", 10);
         const views = parseInt(stats.viewCount ?? "0", 10);
         const videos = parseInt(stats.videoCount ?? "0", 10);
@@ -81,6 +84,7 @@ export async function fetchChannelData(
           videoCount: Math.max(1, videos),
           avgViewsPerVideo: videos > 0 ? Math.round(views / videos) : views,
           yearsActive,
+          topicIds: (topic.topicIds as string[]) ?? [],
         });
       }
     } catch (err) {

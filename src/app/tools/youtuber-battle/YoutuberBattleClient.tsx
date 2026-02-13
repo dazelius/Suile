@@ -2,11 +2,10 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { Swords, Loader2, Shuffle, Trophy, RotateCcw, SkipForward, Search, Share2, Check, Link2, Youtube } from "lucide-react";
+import { Swords, Loader2, Trophy, RotateCcw, SkipForward, Search, Share2, Check, Link2, Youtube } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
-import { YOUTUBERS, type YouTuberPreset } from "./youtuber-presets";
 import { fetchChannelData, searchChannels, type ChannelData } from "./youtube-api";
-import { getYoutuberSkill, type YouTuberSkill } from "./youtuber-skills";
+import { getYoutuberSkill, getYoutuberSkills, type YouTuberSkill, getChannelElement, getElementAdvantage, ELEMENT_INFO, type ElementType } from "./youtuber-skills";
 
 /* ═══════════════════════════════════════════════
    TYPES
@@ -22,7 +21,9 @@ interface GameStats {
 interface Fighter {
   channelId: string; name: string; thumbnailUrl: string;
   stats: GameStats;
-  skill: YouTuberSkill;
+  skill: YouTuberSkill;       // primary skill (display)
+  skills: YouTuberSkill[];    // all skills (1~2)
+  element: ElementType;       // channel attribute
   canvasColor: string; canvasBg: string;
   hp: number; alive: boolean;
   kills: number; totalDamage: number; critsLanded: number;
@@ -43,6 +44,13 @@ interface Marble {
   skillTimer: number; skillActivated: boolean; skillBuff: number;
   hitCounter: number; slowTimer: number;
   atkDebuffTimer: number;
+  bpCount: number;
+  ultGauge: number;
+  ultFired: boolean;
+  ultEffectPending: boolean;
+  isClone: boolean;        // shadow-clone
+  cloneLife: number;       // frames until auto-death
+  ultBuffTimer: number;    // frames of rage-burst etc.
 }
 
 interface FloatingText {
@@ -58,6 +66,47 @@ interface Particle {
 interface Ring {
   x: number; y: number; radius: number; maxRadius: number;
   life: number; maxLife: number; color: string; lineWidth: number;
+}
+
+interface KillEvent {
+  killerName: string;
+  victimName: string;
+  killerThumb: string;
+  victimThumb: string;
+  frame: number;
+}
+
+interface Projectile {
+  x: number; y: number; vx: number; vy: number;
+  targetId: string; ownerId: string;
+  damage: number; life: number;
+  color: string; size: number;
+  type: "missile" | "lightning" | "bullet";
+}
+
+interface SlashLine {
+  x1: number; y1: number;   // start
+  x2: number; y2: number;   // end
+  life: number; maxLife: number;
+  color: string; width: number;
+}
+
+interface CutIn {
+  name: string;
+  skillName: string;
+  skillColor: string;
+  channelId: string;          // for thumbnail lookup
+  startFrame: number;
+  duration: number;           // total frames
+}
+
+interface Camera {
+  x: number; y: number;
+  targetX: number; targetY: number;
+  zoom: number; targetZoom: number;
+  slowMo: number;
+  killEvents: KillEvent[];
+  cutIn: CutIn | null;        // active cut-in
 }
 
 /* ═══════════════════════════════════════════════
@@ -102,12 +151,24 @@ function toGameStats(d: ChannelData): GameStats {
   const avgViews = d.avgViewsPerVideo || 1;
   const years = d.yearsActive || 1;
 
-  const hp = Math.round(Math.max(300, Math.pow(subs, 0.35) * 5));
-  const atk = Math.round(clamp(Math.pow(avgViews, 0.3) * 1.2, 25, 120));
-  const spd = Math.round(clamp(Math.pow(videos, 0.2) * 2.5, 3, 20));
+  // ── HP ← 구독자 (로그 스케일, 격차 압축) ──
+  // 1만→1000, 10만→1200, 100만→1400, 1000만→1600, 1억→1800
+  const hp = Math.round(clamp(Math.log10(Math.max(subs, 1000)) * 350 - 400, 800, 2000));
+
+  // ── ATK ← 영상당 평균 조회수 (로그, 범위 압축) ──
+  // 100뷰→30, 1만뷰→40, 10만뷰→45, 100만뷰→50, 1억뷰→60
+  const atk = Math.round(clamp(10 + Math.log10(Math.max(avgViews, 10)) * 10, 25, 65));
+
+  // ── SPD ← 업로드 빈도 (videos / years) ──
+  const uploadsPerYear = videos / Math.max(years, 0.5);
+  const spd = Math.round(clamp(3 + Math.log10(Math.max(uploadsPerYear, 1)) * 5, 3, 18));
+
+  // ── CRIT ← 바이럴 계수 (조회수/구독자 비율) ──
   const viralRatio = views / Math.max(subs, 1);
-  const crit = Math.round(clamp(5 + Math.log10(Math.max(viralRatio, 1)) * 8, 5, 40));
-  const def = Math.round(clamp(Math.pow(years, 0.5) * 3, 1, 25));
+  const crit = Math.round(clamp(5 + Math.log10(Math.max(viralRatio, 1)) * 6, 5, 30));
+
+  // ── DEF ← 활동 기간 (오래 버틴 채널 = 내구도) ──
+  const def = Math.round(clamp(Math.pow(years, 0.45) * 5, 3, 25));
 
   return { hp, maxHp: hp, atk, spd, crit, def, subs };
 }
@@ -159,7 +220,7 @@ function createMarbles(fighters: Fighter[], W: number, H: number): Marble[] {
     const radius = Math.max(14, Math.round(baseR * sizeFactor));
     const angle = (i / fighters.length) * Math.PI * 2 - Math.PI / 2;
     const velAngle = Math.random() * Math.PI * 2;
-    const vel = 1.5 + (f.stats.spd / 20) * 3;
+    const vel = 1.0 + (f.stats.spd / 20) * 2;
 
     return {
       fighter: f,
@@ -180,6 +241,13 @@ function createMarbles(fighters: Fighter[], W: number, H: number): Marble[] {
       hitCounter: 0,
       slowTimer: 0,
       atkDebuffTimer: 0,
+      bpCount: 0,
+      ultGauge: 0,
+      ultFired: false,
+      ultEffectPending: false,
+      isClone: false,
+      cloneLife: 0,
+      ultBuffTimer: 0,
     };
   });
 }
@@ -209,8 +277,10 @@ function physicsStep(
   marbles: Marble[], W: number, H: number,
   cooldowns: Map<string, number>,
   texts: FloatingText[], particles: Particle[], rings: Ring[],
+  projectiles: Projectile[], slashLines: SlashLine[],
   logs: string[], isKo: boolean, frame: number,
   shake: { value: number },
+  camera: Camera,
 ) {
   const alive = marbles.filter(m => m.alive);
   let DMG_CD = alive.length > 16 ? Math.round(DMG_CD_BASE * 0.5) : alive.length > 10 ? Math.round(DMG_CD_BASE * 0.7) : DMG_CD_BASE;
@@ -220,73 +290,487 @@ function physicsStep(
   if (shake.value > 0) shake.value *= 0.88;
   if (shake.value < 0.3) shake.value = 0;
 
-  // ── Skill: periodic & threshold processing ──
+  // ── Post-cutIn: activate R skill effects ──
+  if (!camera.cutIn) {
+    for (const m of alive) {
+      if (!m.ultEffectPending) continue;
+      m.ultEffectPending = false;
+      const rSk = m.fighter.skills.find(s => s.slot === "R");
+      if (!rSk) continue;
+      const col = rSk.color;
+      const skName = isKo ? rSk.nameKo : rSk.nameEn;
+      texts.push({ x: m.x, y: m.y - m.baseRadius - 35, text: `★ ${skName} ★`, color: col, life: 100, size: 26 });
+      rings.push({ x: m.x, y: m.y, radius: m.baseRadius * 0.3, maxRadius: m.baseRadius * 5, life: 35, maxLife: 35, color: col, lineWidth: 5 });
+      rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: m.baseRadius * 3, life: 22, maxLife: 22, color: "#ffffff", lineWidth: 2 });
+      shake.value = Math.max(shake.value, 14);
+
+      const others = alive.filter(o => o !== m && !o.isClone);
+
+      switch (rSk.id) {
+        // ═══ 1. 분신술 — 2 clones (same thumbnail as original) ═══
+        case "shadow-clone": {
+          const cloneCount = 2;
+          for (let c = 0; c < cloneCount; c++) {
+            const ang = (c / cloneCount) * Math.PI * 2 + Math.random() * 0.5;
+            const spawnDist = m.baseRadius * 2.5;
+            const cloneR = Math.max(10, m.baseRadius * 0.6);
+            const cloneHp = Math.round(m.maxHp * 0.3);
+            const clone: Marble = {
+              // Keep original channelId so thumbnail lookup works, use _clone suffix only for internal ID
+              fighter: { ...m.fighter, channelId: m.fighter.channelId, name: `${m.fighter.name}(분신)`, kills: 0, totalDamage: 0, critsLanded: 0, deathOrder: 0 },
+              x: m.x + Math.cos(ang) * spawnDist, y: m.y + Math.sin(ang) * spawnDist,
+              vx: Math.cos(ang) * 4, vy: Math.sin(ang) * 4,
+              baseRadius: cloneR, radius: cloneR, mass: cloneHp,
+              hp: cloneHp, maxHp: cloneHp, alive: true,
+              rageMode: false, flashTimer: 0,
+              color: m.color, bgColor: m.bgColor,
+              targetId: "", retargetFrame: 0, trail: [],
+              skillTimer: 0, skillActivated: false, skillBuff: 0,
+              hitCounter: 0, slowTimer: 0, atkDebuffTimer: 0, bpCount: 0,
+              ultGauge: 0, ultFired: true, ultEffectPending: false,
+              isClone: true, cloneLife: 360, ultBuffTimer: 0,
+            };
+            marbles.push(clone);
+            for (let k = 0; k < 8; k++) { const a2 = Math.random() * Math.PI * 2; particles.push({ x: clone.x, y: clone.y, vx: Math.cos(a2) * 3, vy: Math.sin(a2) * 3, life: 18, color: col, size: 2 + Math.random() * 3 }); }
+          }
+          logs.push(isKo ? `${m.fighter.name} 분신술! ${cloneCount}마리 소환!` : `${m.fighter.name} Shadow Clone! ${cloneCount} clones!`);
+          break;
+        }
+        // ═══ 2. 일섬 — line dash + slash line ═══
+        case "flash-slash": {
+          const target = others.reduce((a, b) => {
+            const da = (a.x - m.x) ** 2 + (a.y - m.y) ** 2;
+            const db = (b.x - m.x) ** 2 + (b.y - m.y) ** 2;
+            return da < db ? a : b;
+          }, others[0]);
+          if (target) {
+            const startX = m.x, startY = m.y;
+            const dx = target.x - m.x, dy = target.y - m.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const nx = dx / dist, ny = dy / dist;
+            const dashDist = Math.min(dist + 100, W * 0.7);
+            // Damage everything in the line
+            for (const o of others) {
+              const ox = o.x - m.x, oy = o.y - m.y;
+              const proj = ox * nx + oy * ny;
+              if (proj < 0 || proj > dashDist) continue;
+              const perpDist = Math.abs(ox * ny - oy * nx);
+              if (perpDist < o.radius + 40) {
+                const dmg = Math.round(m.fighter.stats.atk * 2.5);
+                o.hp -= dmg;
+                o.vx += nx * 12; o.vy += ny * 12; // knockback
+                texts.push({ x: o.x, y: o.y - o.baseRadius - 14, text: `-${dmg}`, color: col, life: 50, size: 20 });
+                rings.push({ x: o.x, y: o.y, radius: 5, maxRadius: o.baseRadius * 2, life: 18, maxLife: 18, color: col, lineWidth: 3 });
+                o.flashTimer = 15;
+              }
+            }
+            // ── Slash line visual (drawn across screen) ──
+            const endX = startX + nx * dashDist;
+            const endY = startY + ny * dashDist;
+            slashLines.push({ x1: startX, y1: startY, x2: endX, y2: endY, life: 45, maxLife: 45, color: col, width: 8 });
+            // Second thinner cross-slash for style
+            slashLines.push({ x1: startX + ny * 30, y1: startY - nx * 30, x2: endX - ny * 30, y2: endY + nx * 30, life: 40, maxLife: 40, color: "#ffffff", width: 3 });
+            camera.slowMo = Math.max(camera.slowMo, 40);
+            // Slash trail particles
+            for (let k = 0; k < 30; k++) {
+              const t = Math.random() * dashDist;
+              particles.push({ x: startX + nx * t + (Math.random() - 0.5) * 20, y: startY + ny * t + (Math.random() - 0.5) * 20, vx: ny * (Math.random() - 0.5) * 4, vy: -nx * (Math.random() - 0.5) * 4, life: 25 + Math.random() * 15, color: Math.random() > 0.5 ? col : "#ffffff", size: 2 + Math.random() * 4 });
+            }
+            // Teleport user to end of dash
+            m.x += nx * dashDist * 0.8;
+            m.y += ny * dashDist * 0.8;
+            m.x = clamp(m.x, m.radius, W - m.radius);
+            m.y = clamp(m.y, m.radius, H - m.radius);
+          }
+          logs.push(isKo ? `${m.fighter.name} 일섬! 경로 전원 타격!` : `${m.fighter.name} Flash Slash!`);
+          break;
+        }
+        // ═══ 3. 다연발 미사일 — 8 homing missiles ═══
+        case "missile-barrage": {
+          const targets = [...others].sort((a, b) => {
+            const da = (a.x - m.x) ** 2 + (a.y - m.y) ** 2;
+            const db = (b.x - m.x) ** 2 + (b.y - m.y) ** 2;
+            return da - db;
+          });
+          for (let mi = 0; mi < 8; mi++) {
+            const tgt = targets[mi % targets.length];
+            if (!tgt) break;
+            const ang = (mi / 8) * Math.PI * 2;
+            projectiles.push({
+              x: m.x + Math.cos(ang) * m.baseRadius * 1.5,
+              y: m.y + Math.sin(ang) * m.baseRadius * 1.5,
+              vx: Math.cos(ang) * 5, vy: Math.sin(ang) * 5,
+              targetId: tgt.fighter.channelId,
+              ownerId: m.fighter.channelId,
+              damage: Math.round(m.fighter.stats.atk * 1.5),
+              life: 180, color: col, size: 6,
+              type: "missile",
+            });
+          }
+          logs.push(isKo ? `${m.fighter.name} 미사일 8발 발사!` : `${m.fighter.name} Missile Barrage! 8 missiles!`);
+          break;
+        }
+        // ═══ 4. 거대화 — size + HP up ═══
+        case "gigantify": {
+          const hpBonus = Math.round(m.maxHp * 0.5);
+          m.maxHp += hpBonus;
+          m.hp += hpBonus;
+          m.baseRadius *= 1.5;
+          m.mass = m.maxHp;
+          m.fighter.stats.atk = Math.round(m.fighter.stats.atk * 1.3);
+          texts.push({ x: m.x, y: m.y - m.baseRadius - 50, text: `+${hpBonus} HP`, color: "#22d3ee", life: 60, size: 22 });
+          for (let k = 0; k < 20; k++) { const a2 = Math.random() * Math.PI * 2; const sp = 2 + Math.random() * 4; particles.push({ x: m.x, y: m.y, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp, life: 30, color: col, size: 4 + Math.random() * 5 }); }
+          logs.push(isKo ? `${m.fighter.name} 거대화! HP +${hpBonus}!` : `${m.fighter.name} Gigantify! HP +${hpBonus}!`);
+          break;
+        }
+        // ═══ 5. 블랙홀 — pull + AoE ═══
+        case "black-hole": {
+          const bRadius = 200;
+          for (const o of others) {
+            const dx = m.x - o.x, dy = m.y - o.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < bRadius && dist > 1) {
+              const pull = 8 / Math.max(1, dist / 50);
+              o.vx += (dx / dist) * pull;
+              o.vy += (dy / dist) * pull;
+              const dmg = Math.round(m.fighter.stats.atk * 2);
+              o.hp -= dmg;
+              texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: col, life: 40, size: 16 });
+            }
+          }
+          // Visual: expanding dark ring
+          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: bRadius, life: 40, maxLife: 40, color: "#7c3aed", lineWidth: 8 });
+          rings.push({ x: m.x, y: m.y, radius: bRadius, maxRadius: bRadius * 0.3, life: 30, maxLife: 30, color: "#c084fc", lineWidth: 3 }); // contracting ring
+          for (let k = 0; k < 25; k++) { const a2 = Math.random() * Math.PI * 2; const r = Math.random() * bRadius; particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r, vx: -Math.cos(a2) * 3, vy: -Math.sin(a2) * 3, life: 30, color: Math.random() > 0.5 ? "#7c3aed" : "#c084fc", size: 2 + Math.random() * 4 }); }
+          logs.push(isKo ? `${m.fighter.name} 블랙홀! 적 흡입!` : `${m.fighter.name} Black Hole!`);
+          break;
+        }
+        // ═══ 6. 번개 폭풍 — initial burst + sustained lightning aura ═══
+        case "thunder-storm": {
+          // Initial 5 strikes
+          const strikeTargets = [...others].sort(() => Math.random() - 0.5).slice(0, Math.min(5, others.length));
+          for (const o of strikeTargets) {
+            const dmg = Math.round(m.fighter.stats.atk * 2.5);
+            o.hp -= dmg;
+            const knockAng = Math.atan2(o.y - m.y, o.x - m.x);
+            o.vx += Math.cos(knockAng) * 8; o.vy += Math.sin(knockAng) * 8;
+            texts.push({ x: o.x, y: o.y - o.baseRadius - 18, text: `-${dmg}`, color: "#38bdf8", life: 50, size: 20 });
+            for (let k = 0; k < 12; k++) { particles.push({ x: o.x + (Math.random() - 0.5) * 15, y: o.y - k * 15 + (Math.random() - 0.5) * 8, vx: (Math.random() - 0.5) * 3, vy: 2 + Math.random() * 2, life: 18, color: Math.random() > 0.3 ? "#38bdf8" : "#ffffff", size: 2 + Math.random() * 4 }); }
+            rings.push({ x: o.x, y: o.y, radius: 5, maxRadius: o.baseRadius * 3, life: 18, maxLife: 18, color: "#38bdf8", lineWidth: 4 });
+            o.flashTimer = 20;
+          }
+          // Activate sustained lightning aura for 5 seconds
+          m.ultBuffTimer = 300;
+          logs.push(isKo ? `${m.fighter.name} 번개 폭풍! ${strikeTargets.length}회 낙뢰 + 번개 오라!` : `${m.fighter.name} Thunder Storm! ${strikeTargets.length} strikes + lightning aura!`);
+          break;
+        }
+        // ═══ 7. 불사조 — heal + fire AoE ═══
+        case "phoenix": {
+          const heal = Math.round(m.maxHp * 0.4);
+          m.hp = Math.min(m.maxHp, m.hp + heal);
+          texts.push({ x: m.x, y: m.y - m.baseRadius - 50, text: `+${heal} HP`, color: "#4ade80", life: 60, size: 22 });
+          const fireR = 180;
+          for (const o of others) {
+            const dx = o.x - m.x, dy = o.y - m.y;
+            if (dx * dx + dy * dy < fireR * fireR) {
+              const dmg = Math.round(m.fighter.stats.atk * 2);
+              o.hp -= dmg;
+              texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#f97316", life: 40, size: 16 });
+            }
+          }
+          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: fireR, life: 30, maxLife: 30, color: "#f97316", lineWidth: 6 });
+          for (let k = 0; k < 30; k++) { const a2 = Math.random() * Math.PI * 2; const sp = 2 + Math.random() * 5; particles.push({ x: m.x, y: m.y, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp - 2, life: 30 + Math.random() * 20, color: Math.random() > 0.3 ? "#f97316" : "#fbbf24", size: 3 + Math.random() * 5 }); }
+          logs.push(isKo ? `${m.fighter.name} 불사조! HP +${heal} + 화염 폭발!` : `${m.fighter.name} Phoenix! +${heal} HP + fire!`);
+          break;
+        }
+        // ═══ 8. 메테오 — fly into strongest enemy, AoE impact + stun ═══
+        case "meteor": {
+          const strongest = others.reduce((a, b) => a.hp > b.hp ? a : b, others[0]);
+          if (strongest) {
+            const startX = m.x, startY = m.y;
+            const dx = strongest.x - m.x, dy = strongest.y - m.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const nx = dx / dist, ny = dy / dist;
+            // Teleport to target (meteor charge)
+            m.x = strongest.x - nx * (m.radius + strongest.radius + 5);
+            m.y = strongest.y - ny * (m.radius + strongest.radius + 5);
+            m.x = clamp(m.x, m.radius, W - m.radius);
+            m.y = clamp(m.y, m.radius, H - m.radius);
+            // Slash line showing flight path
+            slashLines.push({ x1: startX, y1: startY, x2: m.x, y2: m.y, life: 35, maxLife: 35, color: "#dc2626", width: 10 });
+            slashLines.push({ x1: startX, y1: startY, x2: m.x, y2: m.y, life: 30, maxLife: 30, color: "#f97316", width: 4 });
+            // AoE impact on landing — damage + stun everyone in radius
+            const impactR = 160;
+            for (const o of others) {
+              const odx = o.x - m.x, ody = o.y - m.y;
+              const odist2 = odx * odx + ody * ody;
+              if (odist2 < impactR * impactR) {
+                const closeness = 1 - Math.sqrt(odist2) / impactR; // 1 at center, 0 at edge
+                const dmg = Math.round(m.fighter.stats.atk * (3 + closeness * 2)); // 3x~5x based on proximity
+                o.hp -= dmg;
+                // Knockback away from impact
+                const kAng = Math.atan2(ody, odx);
+                o.vx += Math.cos(kAng) * (8 + closeness * 6);
+                o.vy += Math.sin(kAng) * (8 + closeness * 6);
+                // Stun (slow)
+                o.slowTimer = Math.max(o.slowTimer, 180); // 3 seconds
+                o.flashTimer = 20;
+                texts.push({ x: o.x, y: o.y - o.baseRadius - 18, text: `-${dmg}`, color: "#dc2626", life: 60, size: 22 });
+              }
+            }
+            // Impact visuals
+            rings.push({ x: m.x, y: m.y, radius: 5, maxRadius: impactR, life: 30, maxLife: 30, color: "#dc2626", lineWidth: 7 });
+            rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: impactR * 0.6, life: 22, maxLife: 22, color: "#f97316", lineWidth: 4 });
+            rings.push({ x: m.x, y: m.y, radius: 3, maxRadius: impactR * 0.4, life: 16, maxLife: 16, color: "#fbbf24", lineWidth: 2 });
+            shake.value = Math.max(shake.value, 25);
+            camera.slowMo = Math.max(camera.slowMo, 45);
+            // Explosion particles
+            for (let k = 0; k < 30; k++) { const a2 = Math.random() * Math.PI * 2; const sp = 3 + Math.random() * 6; particles.push({ x: m.x, y: m.y, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp, life: 25 + Math.random() * 15, color: ["#dc2626", "#f97316", "#fbbf24"][Math.floor(Math.random() * 3)], size: 3 + Math.random() * 5 }); }
+            // Fire trail along flight path
+            for (let k = 0; k < 20; k++) {
+              const t = Math.random();
+              const fx = startX + (m.x - startX) * t + (Math.random() - 0.5) * 20;
+              const fy = startY + (m.y - startY) * t + (Math.random() - 0.5) * 20;
+              particles.push({ x: fx, y: fy, vx: (Math.random() - 0.5) * 2, vy: -1 - Math.random() * 2, life: 20 + Math.random() * 10, color: Math.random() > 0.5 ? "#f97316" : "#dc2626", size: 2 + Math.random() * 4 });
+            }
+          }
+          logs.push(isKo ? `${m.fighter.name} 메테오 돌진! ${strongest?.fighter.name} 착지 충격!` : `${m.fighter.name} Meteor Charge! Impact on ${strongest?.fighter.name}!`);
+          break;
+        }
+        // ═══ 9. 빙결장 — freeze all ═══
+        case "frost-field": {
+          for (const o of others) {
+            o.slowTimer = Math.max(o.slowTimer, 300); // 5s freeze
+            const dmg = Math.round(m.fighter.stats.atk * 1.2);
+            o.hp -= dmg;
+            texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#67e8f9", life: 40, size: 14 });
+            for (let k = 0; k < 4; k++) { const a2 = Math.random() * Math.PI * 2; particles.push({ x: o.x, y: o.y, vx: Math.cos(a2) * 2, vy: Math.sin(a2) * 2, life: 25, color: "#67e8f9", size: 2 + Math.random() * 3 }); }
+          }
+          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: W * 0.6, life: 30, maxLife: 30, color: "#67e8f9", lineWidth: 4 });
+          for (let k = 0; k < 20; k++) { const a2 = Math.random() * Math.PI * 2; const r = Math.random() * W * 0.4; particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r, vx: 0, vy: -1, life: 40, color: "#67e8f9", size: 2 + Math.random() * 3, char: "❄" }); }
+          logs.push(isKo ? `${m.fighter.name} 빙결장! 전원 빙결!` : `${m.fighter.name} Frost Field! All frozen!`);
+          break;
+        }
+        // ═══ 10. 분노 폭발 — ATK x3 + hyper speed ═══
+        case "rage-burst": {
+          m.fighter.stats.atk = Math.round(m.fighter.stats.atk * 3);
+          m.ultBuffTimer = 300; // 5 seconds
+          m.rageMode = true;
+          for (let k = 0; k < 25; k++) { const a2 = Math.random() * Math.PI * 2; const sp = 2 + Math.random() * 5; particles.push({ x: m.x, y: m.y, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp, life: 30, color: Math.random() > 0.5 ? "#ef4444" : "#fbbf24", size: 3 + Math.random() * 5 }); }
+          texts.push({ x: m.x, y: m.y - m.baseRadius - 50, text: "ATK ×3!", color: "#ef4444", life: 80, size: 24 });
+          logs.push(isKo ? `${m.fighter.name} 분노 폭발! ATK 3배!` : `${m.fighter.name} Rage Burst! ATK x3!`);
+          break;
+        }
+        // ═══ 11. 머신건 — 20 rapid-fire bullets ═══
+        case "machine-gun": {
+          const closest = others.reduce((a, b) => {
+            const da = (a.x - m.x) ** 2 + (a.y - m.y) ** 2;
+            const db = (b.x - m.x) ** 2 + (b.y - m.y) ** 2;
+            return da < db ? a : b;
+          }, others[0]);
+          if (closest) {
+            const dx = closest.x - m.x, dy = closest.y - m.y;
+            const baseDist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const baseAng = Math.atan2(dy, dx);
+            const bulletDmg = Math.round(m.fighter.stats.atk * 0.8);
+            // Fire 20 bullets in a cone spread
+            for (let bi = 0; bi < 20; bi++) {
+              const spreadAng = baseAng + (bi - 10) * 0.04 + (Math.random() - 0.5) * 0.08;
+              const bulletSpd = 10 + Math.random() * 2;
+              projectiles.push({
+                x: m.x + Math.cos(baseAng) * m.baseRadius * 1.2,
+                y: m.y + Math.sin(baseAng) * m.baseRadius * 1.2,
+                vx: Math.cos(spreadAng) * bulletSpd,
+                vy: Math.sin(spreadAng) * bulletSpd,
+                targetId: closest.fighter.channelId,
+                ownerId: m.fighter.channelId,
+                damage: bulletDmg,
+                life: 60 + bi * 3, // staggered: later bullets live slightly longer
+                color: col, size: 3,
+                type: "bullet",
+              });
+            }
+            // Muzzle flash particles
+            for (let k = 0; k < 15; k++) {
+              const a2 = baseAng + (Math.random() - 0.5) * 0.6;
+              const sp = 3 + Math.random() * 4;
+              particles.push({ x: m.x + Math.cos(baseAng) * m.baseRadius, y: m.y + Math.sin(baseAng) * m.baseRadius, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp, life: 12, color: Math.random() > 0.5 ? "#facc15" : "#ffffff", size: 2 + Math.random() * 3 });
+            }
+            camera.slowMo = Math.max(camera.slowMo, 35);
+          }
+          logs.push(isKo ? `${m.fighter.name} 머신건! 20발 연사!` : `${m.fighter.name} Machine Gun! 20 bullets!`);
+          break;
+        }
+      }
+    }
+  }
+
+  // ── Clone lifespan + ultBuffTimer decay ──
+  for (const m of marbles) {
+    if (m.isClone && m.alive) {
+      m.cloneLife--;
+      if (m.cloneLife <= 0) { m.alive = false; m.hp = 0; for (let k = 0; k < 5; k++) { const a = Math.random() * Math.PI * 2; particles.push({ x: m.x, y: m.y, vx: Math.cos(a) * 2, vy: Math.sin(a) * 2, life: 12, color: "#c084fc", size: 2 }); } }
+    }
+    if (m.ultBuffTimer > 0) {
+      m.ultBuffTimer--;
+
+      // ── Thunder Storm: sustained lightning aura tick ──
+      const hasThunder = m.fighter.skills.some(s => s.id === "thunder-storm");
+      if (hasThunder && m.alive) {
+        const thunderRadius = 150;
+        // Lightning ring visual every 5 frames
+        if (m.ultBuffTimer % 5 === 0) {
+          const ringAng = (frame * 0.15) % (Math.PI * 2);
+          for (let k = 0; k < 3; k++) {
+            const a2 = ringAng + (k / 3) * Math.PI * 2;
+            const px = m.x + Math.cos(a2) * (thunderRadius * 0.6 + Math.sin(frame * 0.1 + k) * 20);
+            const py = m.y + Math.sin(a2) * (thunderRadius * 0.6 + Math.sin(frame * 0.1 + k) * 20);
+            particles.push({ x: px, y: py, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, life: 12, color: Math.random() > 0.4 ? "#38bdf8" : "#ffffff", size: 2 + Math.random() * 3 });
+          }
+        }
+        // Expanding ring visual every 20 frames
+        if (m.ultBuffTimer % 20 === 0) {
+          rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: thunderRadius, life: 16, maxLife: 16, color: "#38bdf8", lineWidth: 2.5 });
+        }
+        // Damage tick every 30 frames (~0.5s)
+        if (m.ultBuffTimer % 30 === 0) {
+          const nearby = alive.filter(o => o !== m && !o.isClone);
+          for (const o of nearby) {
+            const dx = o.x - m.x, dy = o.y - m.y;
+            if (dx * dx + dy * dy < thunderRadius * thunderRadius) {
+              const dmg = Math.round(m.fighter.stats.atk * 0.8);
+              o.hp -= dmg;
+              o.flashTimer = 8;
+              texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#38bdf8", life: 30, size: 14 });
+              // Small lightning bolt particles
+              for (let k = 0; k < 4; k++) { particles.push({ x: o.x + (Math.random() - 0.5) * 10, y: o.y - k * 8, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random(), life: 12, color: "#38bdf8", size: 2 + Math.random() * 2 }); }
+            }
+          }
+        }
+      }
+
+      if (m.ultBuffTimer === 0) {
+        const hasRage = m.fighter.skills.some(s => s.id === "rage-burst");
+        if (hasRage) {
+          // Revert rage-burst
+          m.fighter.stats.atk = Math.round(m.fighter.stats.atk / 3);
+          m.rageMode = false;
+        }
+        texts.push({ x: m.x, y: m.y - m.baseRadius - 20, text: isKo ? "버프 종료" : "Buff end", color: "#71717a", life: 40, size: 12 });
+      }
+    }
+  }
+
+  // ── Skill: E (periodic) & R (threshold/onKill) processing ──
   for (const m of alive) {
     m.skillTimer++;
     if (m.skillBuff > 0) m.skillBuff--;
     if (m.slowTimer > 0) m.slowTimer--;
     if (m.atkDebuffTimer > 0) m.atkDebuffTimer--;
-    const sk = m.fighter.skill;
+
+    // ── Ult gauge: passive regen over time (1 per 60 frames ≈ 1/sec) ──
+    if (!m.ultFired && !m.isClone && frame % 60 === 0) {
+      m.ultGauge = Math.min(100, m.ultGauge + 1);
+    }
+
     const hpPct = m.hp / m.maxHp;
 
-    // Periodic skills
-    if (sk.type === "periodic" && sk.interval && m.skillTimer >= sk.interval) {
-      m.skillTimer = 0;
-      switch (sk.id) {
-        case "mukbang":
-        case "nursery":
-        case "army-power": {
-          const rate = sk.id === "nursery" ? 0.04 : sk.id === "army-power" ? 0.025 : 0.03;
-          const heal = Math.round(m.maxHp * rate);
-          m.hp = Math.min(m.maxHp, m.hp + heal);
-          texts.push({ x: m.x, y: m.y - m.baseRadius - 14, text: `+${heal}`, color: sk.color, life: 35, size: 12 });
-          break;
-        }
-        case "investing": {
-          const heal = Math.round(m.maxHp * 0.02);
-          m.hp = Math.min(m.maxHp, m.hp + heal);
-          m.fighter.stats.atk = Math.round(m.fighter.stats.atk * 1.03);
-          texts.push({ x: m.x, y: m.y - m.baseRadius - 14, text: `+${heal}`, color: sk.color, life: 35, size: 12 });
-          break;
-        }
-        case "workman": {
-          m.fighter.stats.atk = Math.min(Math.round(m.fighter.stats.atk * 1.05), 150);
-          texts.push({ x: m.x, y: m.y - m.baseRadius - 14, text: "ATK UP", color: sk.color, life: 35, size: 11 });
-          break;
-        }
-        case "minecraft": {
-          m.fighter.stats.def = Math.min(Math.round(m.fighter.stats.def * 1.05), 35);
-          break;
-        }
-        case "serenade": {
-          for (const other of alive) {
-            if (other === m) continue;
-            const dx = other.x - m.x, dy = other.y - m.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 150) other.atkDebuffTimer = Math.max(other.atkDebuffTimer, 90);
+    for (const sk of m.fighter.skills) {
+      // ── E: Periodic skills ──
+      if (sk.type === "periodic" && sk.interval && m.skillTimer >= sk.interval) {
+        m.skillTimer = 0;
+        const sName = isKo ? sk.nameKo : sk.nameEn;
+        switch (sk.id) {
+          case "regen": case "heal-burst": {
+            const rate = sk.id === "heal-burst" ? 0.05 : 0.03;
+            const heal = Math.round(m.maxHp * rate);
+            m.hp = Math.min(m.maxHp, m.hp + heal);
+            texts.push({ x: m.x, y: m.y - m.baseRadius - 18, text: `[E] +${heal}`, color: sk.color, life: 40, size: 14 });
+            // Green sparkle
+            for (let k = 0; k < 6; k++) { const ang = Math.random() * Math.PI * 2; particles.push({ x: m.x, y: m.y, vx: Math.cos(ang) * 2, vy: Math.sin(ang) * 2 - 1, life: 20, color: sk.color, size: 3 + Math.random() * 2 }); }
+            break;
           }
-          texts.push({ x: m.x, y: m.y - m.baseRadius - 20, text: isKo ? "ATK 감소!" : "ATK Down!", color: sk.color, life: 45, size: 12 });
-          break;
+          case "power-up": case "bloodlust": {
+            m.fighter.stats.atk = Math.min(Math.round(m.fighter.stats.atk * 1.04), 95);
+            if (sk.id === "bloodlust") m.fighter.stats.spd = Math.min(m.fighter.stats.spd + 1, 25);
+            texts.push({ x: m.x, y: m.y - m.baseRadius - 18, text: `[E] ATK UP`, color: sk.color, life: 40, size: 14 });
+            rings.push({ x: m.x, y: m.y, radius: m.baseRadius * 0.5, maxRadius: m.baseRadius * 1.8, life: 18, maxLife: 18, color: sk.color, lineWidth: 2 });
+            break;
+          }
+          case "fortify": {
+            m.fighter.stats.def = Math.min(m.fighter.stats.def + 1, 40);
+            texts.push({ x: m.x, y: m.y - m.baseRadius - 18, text: `[E] DEF +1`, color: sk.color, life: 40, size: 14 });
+            // Blue shield flash
+            rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: m.baseRadius * 1.5, life: 15, maxLife: 15, color: "#60a5fa", lineWidth: 3 });
+            break;
+          }
+          case "war-cry": {
+            for (const other of alive) {
+              if (other === m) continue;
+              const dx = other.x - m.x, dy = other.y - m.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 160) { other.atkDebuffTimer = Math.max(other.atkDebuffTimer, 100); }
+            }
+            texts.push({ x: m.x, y: m.y - m.baseRadius - 24, text: `[E] ${sName}`, color: sk.color, life: 50, size: 16 });
+            rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: 160, life: 22, maxLife: 22, color: sk.color, lineWidth: 3 });
+            for (let k = 0; k < 10; k++) { const ang = Math.random() * Math.PI * 2; const sp = 2 + Math.random() * 3; particles.push({ x: m.x, y: m.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: 25, color: sk.color, size: 2 + Math.random() * 3 }); }
+            break;
+          }
+          case "mana-burn": {
+            let nearest: Marble | null = null, nearDist = Infinity;
+            for (const other of alive) {
+              if (other === m) continue;
+              const dx = other.x - m.x, dy = other.y - m.y;
+              const d = dx * dx + dy * dy;
+              if (d < nearDist) { nearDist = d; nearest = other; }
+            }
+            if (nearest) {
+              const burn = Math.round(nearest.maxHp * 0.02);
+              nearest.hp -= burn;
+              texts.push({ x: nearest.x, y: nearest.y - nearest.baseRadius - 14, text: `-${burn}`, color: sk.color, life: 35, size: 13 });
+              // Purple line from m to nearest
+              for (let k = 0; k < 4; k++) { const t2 = Math.random(); particles.push({ x: m.x + (nearest.x - m.x) * t2, y: m.y + (nearest.y - m.y) * t2, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, life: 12, color: sk.color, size: 2 + Math.random() * 2 }); }
+            }
+            break;
+          }
+          case "aura-of-speed": break; // passive, handled in movement
+          default: break;
         }
-        default: break;
       }
+
+      // (R is gauge-based now, processed separately below)
     }
 
-    // shape-of-you: 1% HP regen per second (onDamaged type but has regen)
-    if (sk.id === "shape-of-you" && m.skillTimer >= 60) {
-      m.skillTimer = 0;
-      const heal = Math.round(m.maxHp * 0.01);
-      m.hp = Math.min(m.maxHp, m.hp + heal);
-    }
+    // ── R: Ultimate gauge check — fire when gauge reaches 100 ──
+    if (!m.ultFired && m.ultGauge >= 100) {
+      const rSkill = m.fighter.skills.find(s => s.slot === "R");
+      if (rSkill) {
+        m.ultFired = true;
+        m.ultGauge = 100;
+        m.skillActivated = true;
+        m.skillBuff = 99999;
+        const skillName = isKo ? rSkill.nameKo : rSkill.nameEn;
 
-    // Threshold skills
-    if (sk.type === "threshold" && !m.skillActivated && sk.hpThreshold && hpPct <= sk.hpThreshold) {
-      m.skillActivated = true;
-      m.skillBuff = 99999;
-      const skillName = isKo ? sk.nameKo : sk.nameEn;
-      texts.push({ x: m.x, y: m.y - m.baseRadius - 24, text: skillName, color: sk.color, life: 60, size: 14 });
-      logs.push(isKo ? `${m.fighter.name} [${skillName}] 발동!` : `${m.fighter.name} [${skillName}] activated!`);
-      rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: m.baseRadius * 3, life: 25, maxLife: 25, color: sk.color, lineWidth: 3 });
+        // ── R activation (text deferred to post-cutIn) ──
+        logs.push(isKo
+          ? `[궁극기] ${m.fighter.name} — ${skillName} 발동!`
+          : `[ULTIMATE] ${m.fighter.name} — ${skillName} activated!`);
+
+        // ── FREEZE + camera zoom + CUT-IN for R (no shake!) ──
+        camera.targetX = m.x;
+        camera.targetY = m.y;
+        camera.targetZoom = 1.8;
+        camera.slowMo = Math.max(camera.slowMo, 90);
+        camera.cutIn = {
+          name: m.fighter.name,
+          skillName: skillName,
+          skillColor: rSkill.color,
+          channelId: m.fighter.channelId,
+          startFrame: frame,
+          duration: 80,
+        };
+        m.ultEffectPending = true; // explosion + R effects deferred to after cut-in
+      }
     }
   }
 
@@ -314,8 +798,8 @@ function physicsStep(
       const dx = target.x - m.x, dy = target.y - m.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > 1) {
-        const baseForce = 0.045 + (m.fighter.stats.atk / 110) * 0.05;
-        const force = m.rageMode ? baseForce * 1.8 : baseForce;
+        const baseForce = 0.03 + (m.fighter.stats.atk / 110) * 0.035;
+        const force = m.rageMode ? baseForce * 1.6 : baseForce;
         m.vx += (dx / dist) * force;
         m.vy += (dy / dist) * force;
       }
@@ -325,11 +809,12 @@ function physicsStep(
     m.vx += (Math.random() - 0.5) * 0.08 * chaos;
     m.vy += (Math.random() - 0.5) * 0.08 * chaos;
 
-    let maxSpd = 2.2 + (m.fighter.stats.spd / 20) * 4.0;
-    maxSpd *= (1 + frame * 0.00025);
-    const mSk = m.fighter.skill;
-    if (mSk.id === "traveler" || mSk.id === "dance-power" || mSk.id === "speedrun") maxSpd *= 1.35;
-    if (mSk.id === "legend" && m.skillBuff > 0) maxSpd *= 1.3;
+    let maxSpd = 1.6 + (m.fighter.stats.spd / 20) * 2.8;
+    maxSpd *= (1 + frame * 0.0002);
+    const mHas = (id: string) => m.fighter.skills.some(s => s.id === id);
+    if (mHas("aura-of-speed")) maxSpd *= 1.3;
+    if (mHas("adrenaline") && m.skillBuff > 0) maxSpd *= 1.5;
+    if (m.ultBuffTimer > 0 && m.fighter.skills.some(s => s.id === "rage-burst")) maxSpd *= 2;
     if (m.slowTimer > 0) maxSpd *= 0.6;
     const rageSpd = m.rageMode ? maxSpd * 1.3 : maxSpd;
     const curSpd = Math.sqrt(m.vx * m.vx + m.vy * m.vy);
@@ -404,8 +889,8 @@ function physicsStep(
       cooldowns.set(key, frame);
 
       const relSpeed = Math.sqrt(dvx * dvx + dvy * dvy);
-      const spdF = Math.max(0.4, relSpeed / 5);
-      const timeScale = 1 + frame * 0.00015;
+      const spdF = clamp(0.6 + relSpeed / 8, 0.6, 1.8);
+      const timeScale = 1 + frame * 0.00008;
 
       let atkA = a.fighter.stats.atk, atkB = b.fighter.stats.atk;
       if (a.atkDebuffTimer > 0) atkA = Math.round(atkA * 0.9);
@@ -414,61 +899,115 @@ function physicsStep(
       let critChanceA = a.fighter.stats.crit, critChanceB = b.fighter.stats.crit;
       const hpPctA = a.hp / a.maxHp, hpPctB = b.hp / b.maxHp;
 
-      // Skill: onAttack / threshold modifiers
-      const skA = a.fighter.skill, skB = b.fighter.skill;
-      if (skA.type === "threshold" && a.skillBuff > 0) atkA = Math.round(atkA * 1.25);
-      if (skB.type === "threshold" && b.skillBuff > 0) atkB = Math.round(atkB * 1.25);
-      if (skA.id === "bollywood" && a.skillBuff > 0) atkA = Math.round(atkA * 1.5);
-      if (skB.id === "bollywood" && b.skillBuff > 0) atkB = Math.round(atkB * 1.5);
-      if (skA.id === "horror" && a.skillBuff > 0) atkA = Math.round(atkA * 1.4);
-      if (skB.id === "horror" && b.skillBuff > 0) atkB = Math.round(atkB * 1.4);
-      if (skA.id === "legend" && a.skillBuff > 0) { atkA = Math.round(atkA * 1.3); }
-      if (skB.id === "legend" && b.skillBuff > 0) { atkB = Math.round(atkB * 1.3); }
+      // ── Generic skill modifiers (all skills for each fighter) ──
+      const skillsA = a.fighter.skills, skillsB = b.fighter.skills;
+      const hasSkillA = (id: string) => skillsA.some(s => s.id === id);
+      const hasSkillB = (id: string) => skillsB.some(s => s.id === id);
 
-      if (skA.id === "analysis") critChanceA *= 2;
-      if (skB.id === "analysis") critChanceB *= 2;
-      if (skA.id === "meme-lord") { critChanceA *= 2; }
-      if (skB.id === "meme-lord") { critChanceB *= 2; }
+      // Threshold ATK buffs (moderate — E-slot handled)
+      if (a.skillBuff > 0) {
+        if (hasSkillA("adrenaline")) { /* handled in speed section */ }
+        else atkA = Math.round(atkA * 1.15);
+      }
+      if (b.skillBuff > 0) {
+        if (hasSkillB("adrenaline")) { /* handled in speed section */ }
+        else atkB = Math.round(atkB * 1.15);
+      }
+
+      // ── Q: onAttack crit modifiers ──
+      if (hasSkillA("critical-eye")) critChanceA *= 2;
+      if (hasSkillB("critical-eye")) critChanceB *= 2;
+
+      // Q: armor break
+      if (hasSkillA("armor-break")) defB = 0;
+      if (hasSkillB("armor-break")) defA = 0;
 
       const critA = Math.random() * 100 < critChanceA;
-      let dmgA = atkA * spdF * (0.8 + Math.random() * 0.4);
-      if (a.rageMode) dmgA *= 1.4;
-      if (critA) dmgA *= 2.0;
-      if (critA && skA.id === "meme-lord") dmgA *= 1.5;
-      if (skA.id === "comedy" && Math.random() < 0.3) dmgA *= 2;
-      if (skA.id === "trick-shot" && Math.random() < 0.1) dmgA *= 3;
-      if (skA.id === "nerd" && hpPctA > 0.7) dmgA *= 2;
-      if (skA.id === "chaos") dmgA *= Math.random() < 0.5 ? 1.8 : 0.7;
-      dmgA = Math.max(1, Math.round(dmgA - defB * 0.5));
+      let dmgA = atkA * spdF * (0.85 + Math.random() * 0.3);
+      if (a.rageMode) dmgA *= 1.25;
+      if (critA) dmgA *= 1.6;
+      // Q: attack skills for A (additive bonus, not multiplicative)
+      let bonusA = 0;
+      if (hasSkillA("power-strike") && Math.random() < 0.25) { bonusA += dmgA * 0.5; texts.push({ x: a.x, y: a.y - a.baseRadius - 30, text: "[Q] POWER!", color: "#ef4444", life: 35, size: 16 }); }
+      if (hasSkillA("chaos-strike")) { const good = Math.random() < 0.5; bonusA += good ? dmgA * 0.4 : -dmgA * 0.2; if (good) texts.push({ x: a.x, y: a.y - a.baseRadius - 28, text: "[Q] CHAOS!", color: "#f97316", life: 30, size: 14 }); }
+      if (hasSkillA("double-tap") && Math.random() < 0.2) { bonusA += dmgA * 0.5; texts.push({ x: a.x, y: a.y - a.baseRadius - 28, text: "[Q] x2!", color: "#fb923c", life: 30, size: 14 }); }
+      if (hasSkillA("execute") && hpPctB < 0.3) { bonusA += dmgA * 0.6; texts.push({ x: b.x, y: b.y - b.baseRadius - 30, text: "[Q] EXECUTE!", color: "#7f1d1d", life: 40, size: 18 }); rings.push({ x: b.x, y: b.y, radius: b.baseRadius, maxRadius: b.baseRadius * 2.5, life: 18, maxLife: 18, color: "#7f1d1d", lineWidth: 3 }); }
+      if (hasSkillA("chain-lightning") && Math.random() < 0.1) { bonusA += dmgA * 1.0; texts.push({ x: a.x, y: a.y - a.baseRadius - 30, text: "[Q] THUNDER!", color: "#38bdf8", life: 40, size: 18 }); shake.value = Math.max(shake.value, 6); for (let k = 0; k < 8; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: b.x, y: b.y, vx: Math.cos(ang2) * 4, vy: Math.sin(ang2) * 4, life: 20, color: "#38bdf8", size: 3 + Math.random() * 3 }); } }
+      if (hasSkillA("blaze")) bonusA += 15;
+      dmgA += bonusA;
+      // DEF: 비율 감소 (DEF 25 → 약 33% 감소)
+      const defReductionB = 1 - (defB / (defB + 50));
+      dmgA = Math.max(1, Math.round(dmgA * defReductionB));
 
       const critB = Math.random() * 100 < critChanceB;
-      let dmgB = atkB * spdF * (0.8 + Math.random() * 0.4);
-      if (b.rageMode) dmgB *= 1.4;
-      if (critB) dmgB *= 2.0;
-      if (critB && skB.id === "meme-lord") dmgB *= 1.5;
-      if (skB.id === "comedy" && Math.random() < 0.3) dmgB *= 2;
-      if (skB.id === "trick-shot" && Math.random() < 0.1) dmgB *= 3;
-      if (skB.id === "nerd" && hpPctB > 0.7) dmgB *= 2;
-      if (skB.id === "chaos") dmgB *= Math.random() < 0.5 ? 1.8 : 0.7;
-      dmgB = Math.max(1, Math.round(dmgB - defA * 0.5));
+      let dmgB = atkB * spdF * (0.85 + Math.random() * 0.3);
+      if (b.rageMode) dmgB *= 1.25;
+      if (critB) dmgB *= 1.6;
+      let bonusB = 0;
+      if (hasSkillB("power-strike") && Math.random() < 0.25) { bonusB += dmgB * 0.5; texts.push({ x: b.x, y: b.y - b.baseRadius - 30, text: "[Q] POWER!", color: "#ef4444", life: 35, size: 16 }); }
+      if (hasSkillB("chaos-strike")) { const good = Math.random() < 0.5; bonusB += good ? dmgB * 0.4 : -dmgB * 0.2; if (good) texts.push({ x: b.x, y: b.y - b.baseRadius - 28, text: "[Q] CHAOS!", color: "#f97316", life: 30, size: 14 }); }
+      if (hasSkillB("double-tap") && Math.random() < 0.2) { bonusB += dmgB * 0.5; texts.push({ x: b.x, y: b.y - b.baseRadius - 28, text: "[Q] x2!", color: "#fb923c", life: 30, size: 14 }); }
+      if (hasSkillB("execute") && hpPctA < 0.3) { bonusB += dmgB * 0.6; texts.push({ x: a.x, y: a.y - a.baseRadius - 30, text: "[Q] EXECUTE!", color: "#7f1d1d", life: 40, size: 18 }); rings.push({ x: a.x, y: a.y, radius: a.baseRadius, maxRadius: a.baseRadius * 2.5, life: 18, maxLife: 18, color: "#7f1d1d", lineWidth: 3 }); }
+      if (hasSkillB("chain-lightning") && Math.random() < 0.1) { bonusB += dmgB * 1.0; texts.push({ x: b.x, y: b.y - b.baseRadius - 30, text: "[Q] THUNDER!", color: "#38bdf8", life: 40, size: 18 }); shake.value = Math.max(shake.value, 6); for (let k = 0; k < 8; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: a.x, y: a.y, vx: Math.cos(ang2) * 4, vy: Math.sin(ang2) * 4, life: 20, color: "#38bdf8", size: 3 + Math.random() * 3 }); } }
+      if (hasSkillB("blaze")) bonusB += 15;
+      dmgB += bonusB;
+      const defReductionA = 1 - (defA / (defA + 50));
+      dmgB = Math.max(1, Math.round(dmgB * defReductionA));
 
-      // onDamaged modifiers
-      if (skB.id === "calm-power" || skB.id === "kids-power") dmgA = Math.round(dmgA * 0.8);
-      if (skA.id === "calm-power" || skA.id === "kids-power") dmgB = Math.round(dmgB * 0.8);
-      if (skB.id === "kids-power") dmgA = Math.round(dmgA * 0.75);
-      if (skA.id === "kids-power") dmgB = Math.round(dmgB * 0.75);
-      if (skB.id === "science") dmgA = Math.round(dmgA * (1 - defB * 0.003));
-      if (skA.id === "science") dmgB = Math.round(dmgB * (1 - defA * 0.003));
-      if (skB.id === "truth") dmgA = Math.round(dmgA * 0.6);
-      if (skA.id === "truth") dmgB = Math.round(dmgB * 0.6);
-      if (skB.id === "shape-of-you") dmgA = Math.round(dmgA * 0.85);
-      if (skA.id === "shape-of-you") dmgB = Math.round(dmgB * 0.85);
-      if (skB.id === "british" && critA) dmgA = Math.round(dmgA * 0.5);
-      if (skA.id === "british" && critB) dmgB = Math.round(dmgB * 0.5);
-      if (skB.id === "scream" && dmgB > 0) a.slowTimer = 120;
-      if (skA.id === "scream" && dmgA > 0) b.slowTimer = 120;
-      if (skB.id === "blue-fire" && dmgB > 0) a.slowTimer = 120;
-      if (skA.id === "blue-fire" && dmgA > 0) b.slowTimer = 120;
+      // ── Element advantage ──
+      const elemMulA = getElementAdvantage(a.fighter.element, b.fighter.element);
+      const elemMulB = getElementAdvantage(b.fighter.element, a.fighter.element);
+      if (elemMulA !== 1.0) {
+        dmgA = Math.max(1, Math.round(dmgA * elemMulA));
+        const eInfo = ELEMENT_INFO[a.fighter.element];
+        if (elemMulA > 1) {
+          texts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 20, text: `${eInfo.icon} 속성 유리!`, color: eInfo.color, life: 40, size: 15 });
+          for (let k = 0; k < 5; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: b.x, y: b.y, vx: Math.cos(ang2) * 3, vy: Math.sin(ang2) * 3, life: 18, color: eInfo.color, size: 2 + Math.random() * 3 }); }
+        } else {
+          texts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 20, text: "속성 불리...", color: "#9ca3af", life: 35, size: 13 });
+        }
+      }
+      if (elemMulB !== 1.0) {
+        dmgB = Math.max(1, Math.round(dmgB * elemMulB));
+        const eInfo = ELEMENT_INFO[b.fighter.element];
+        if (elemMulB > 1) {
+          texts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 10, text: `${eInfo.icon} 속성 유리!`, color: eInfo.color, life: 40, size: 15 });
+          for (let k = 0; k < 5; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: a.x, y: a.y, vx: Math.cos(ang2) * 3, vy: Math.sin(ang2) * 3, life: 18, color: eInfo.color, size: 2 + Math.random() * 3 }); }
+        } else {
+          texts.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 10, text: "속성 불리...", color: "#9ca3af", life: 35, size: 13 });
+        }
+      }
+
+      // ── W: onDamaged modifiers ──
+      let dodgedA = false, dodgedB = false;
+      for (const sk of skillsB) {
+        if (sk.id === "iron-wall") dmgA = Math.round(dmgA * 0.8);
+        if (sk.id === "rubber-body") { dmgA = Math.round(dmgA * 0.85); a.hp -= Math.round(dmgA * 0.1); }
+        if (sk.id === "thick-skin" && critA) dmgA = Math.round(dmgA * 0.5);
+        if (sk.id === "dodge-master" && Math.random() < 0.15) { dmgA = 0; dodgedB = true; texts.push({ x: b.x, y: b.y - b.baseRadius - 28, text: "[W] DODGE!", color: "#c084fc", life: 35, size: 16 }); }
+        if (sk.id === "counter") { const ref = Math.round(dmgA * 0.25); a.hp -= ref; if (ref > 0) texts.push({ x: a.x, y: a.y - a.baseRadius - 20, text: `[W] -${ref}`, color: "#f472b6", life: 30, size: 13 }); }
+        if (sk.id === "bone-plate") { b.bpCount++; if (b.bpCount % 4 === 0) { dmgA = 0; texts.push({ x: b.x, y: b.y - b.baseRadius - 28, text: "[W] BLOCK!", color: "#a3a3a3", life: 35, size: 16 }); rings.push({ x: b.x, y: b.y, radius: b.baseRadius, maxRadius: b.baseRadius * 1.5, life: 12, maxLife: 12, color: "#a3a3a3", lineWidth: 3 }); } }
+        if (sk.id === "thorn-mail") { const ref2 = Math.round(dmgA * 0.2); a.hp -= ref2; a.slowTimer = Math.max(a.slowTimer, 60); if (ref2 > 0) { texts.push({ x: a.x, y: a.y - a.baseRadius - 20, text: `[W] -${ref2}`, color: "#65a30d", life: 30, size: 13 }); for (let k = 0; k < 4; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: a.x, y: a.y, vx: Math.cos(ang2) * 2, vy: Math.sin(ang2) * 2, life: 15, color: "#65a30d", size: 2 + Math.random() * 2 }); } } }
+        if (sk.id === "spirit-shield" && hpPctB < 0.5) dmgA = Math.round(dmgA * 0.7);
+      }
+      for (const sk of skillsA) {
+        if (sk.id === "iron-wall") dmgB = Math.round(dmgB * 0.8);
+        if (sk.id === "rubber-body") { dmgB = Math.round(dmgB * 0.85); b.hp -= Math.round(dmgB * 0.1); }
+        if (sk.id === "thick-skin" && critB) dmgB = Math.round(dmgB * 0.5);
+        if (sk.id === "dodge-master" && Math.random() < 0.15) { dmgB = 0; dodgedA = true; texts.push({ x: a.x, y: a.y - a.baseRadius - 28, text: "[W] DODGE!", color: "#c084fc", life: 35, size: 16 }); }
+        if (sk.id === "counter") { const ref = Math.round(dmgB * 0.25); b.hp -= ref; if (ref > 0) texts.push({ x: b.x, y: b.y - b.baseRadius - 20, text: `[W] -${ref}`, color: "#f472b6", life: 30, size: 13 }); }
+        if (sk.id === "bone-plate") { a.bpCount++; if (a.bpCount % 4 === 0) { dmgB = 0; texts.push({ x: a.x, y: a.y - a.baseRadius - 28, text: "[W] BLOCK!", color: "#a3a3a3", life: 35, size: 16 }); rings.push({ x: a.x, y: a.y, radius: a.baseRadius, maxRadius: a.baseRadius * 1.5, life: 12, maxLife: 12, color: "#a3a3a3", lineWidth: 3 }); } }
+        if (sk.id === "thorn-mail") { const ref2 = Math.round(dmgB * 0.2); b.hp -= ref2; b.slowTimer = Math.max(b.slowTimer, 60); if (ref2 > 0) { texts.push({ x: b.x, y: b.y - b.baseRadius - 20, text: `[W] -${ref2}`, color: "#65a30d", life: 30, size: 13 }); for (let k = 0; k < 4; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: b.x, y: b.y, vx: Math.cos(ang2) * 2, vy: Math.sin(ang2) * 2, life: 15, color: "#65a30d", size: 2 + Math.random() * 2 }); } } }
+        if (sk.id === "spirit-shield" && hpPctA < 0.5) dmgB = Math.round(dmgB * 0.7);
+      }
+
+      // Q: slow/venom
+      if (hasSkillA("venom") && dmgA > 0 && !dodgedB) { b.slowTimer = 120; for (let k = 0; k < 4; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: b.x, y: b.y, vx: Math.cos(ang2) * 1.5, vy: Math.sin(ang2) * 1.5, life: 25, color: "#a855f7", size: 2 + Math.random() * 2 }); } }
+      if (hasSkillB("venom") && dmgB > 0 && !dodgedA) { a.slowTimer = 120; for (let k = 0; k < 4; k++) { const ang2 = Math.random() * Math.PI * 2; particles.push({ x: a.x, y: a.y, vx: Math.cos(ang2) * 1.5, vy: Math.sin(ang2) * 1.5, life: 25, color: "#a855f7", size: 2 + Math.random() * 2 }); } }
+
+      // Q: life steal
+      if (hasSkillA("life-steal") && dmgA > 0) { const lsHeal = Math.round(dmgA * 0.15); a.hp = Math.min(a.maxHp, a.hp + lsHeal); texts.push({ x: a.x, y: a.y - a.baseRadius - 22, text: `[Q] +${lsHeal}`, color: "#e11d48", life: 30, size: 12 }); }
+      if (hasSkillB("life-steal") && dmgB > 0) { const lsHeal = Math.round(dmgB * 0.15); b.hp = Math.min(b.maxHp, b.hp + lsHeal); texts.push({ x: b.x, y: b.y - b.baseRadius - 22, text: `[Q] +${lsHeal}`, color: "#e11d48", life: 30, size: 12 }); }
 
       dmgA = Math.round(dmgA * timeScale);
       dmgB = Math.round(dmgB * timeScale);
@@ -477,6 +1016,18 @@ function physicsStep(
       a.fighter.totalDamage += dmgA; b.fighter.totalDamage += dmgB;
       if (critA) a.fighter.critsLanded++;
       if (critB) b.fighter.critsLanded++;
+
+      // ── Ult gauge charge on hit ──
+      if (!a.ultFired) {
+        let chg = 4 + Math.min(3, Math.round(dmgA / 40));
+        if (critA) chg += 3;
+        a.ultGauge = Math.min(100, a.ultGauge + chg);
+      }
+      if (!b.ultFired) {
+        let chg = 4 + Math.min(3, Math.round(dmgB / 40));
+        if (critB) chg += 3;
+        b.ultGauge = Math.min(100, b.ultGauge + chg);
+      }
 
       for (let k = 0; k < Math.min(5, Math.ceil(dmgB / 60)); k++) {
         const ang = Math.random() * Math.PI * 2;
@@ -487,9 +1038,7 @@ function physicsStep(
         particles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * (1.2 + Math.random() * 2.5), vy: Math.sin(ang) * (1.2 + Math.random() * 2.5) - 1.5, life: 28 + Math.random() * 16, color: "#f87171", size: 6 + Math.random() * 3 });
       }
 
-      let knockA = 1, knockB = 1;
-      if (skA.id === "wrestling") knockA = 2;
-      if (skB.id === "wrestling") knockB = 2;
+      const knockA = 1, knockB = 1;
 
       if (critA) {
         const knockF = (3 + dmgA / 50) * timeScale * knockA;
@@ -544,15 +1093,26 @@ function physicsStep(
 
       const spawnDeath = (m: Marble, killer: Marble) => {
         m.alive = false; m.hp = 0;
+        if (m.isClone) return; // clones just disappear silently
         killer.fighter.kills++;
         m.fighter.deathOrder = frame;
         shake.value = Math.max(shake.value, 14);
 
-        let absorbRate = 0.2;
-        if (killer.fighter.skill.id === "feast" || killer.fighter.skill.id === "money-challenge") absorbRate = 0.6;
-        if (killer.fighter.skill.id === "hustle" || killer.fighter.skill.id === "jyp-nation") absorbRate = 0.4;
-        if (killer.fighter.skill.id === "challenge") killer.fighter.stats.atk = Math.round(killer.fighter.stats.atk * 1.15);
-        if (killer.fighter.skill.id === "hustle") killer.fighter.stats.atk = Math.round(killer.fighter.stats.atk * 1.1);
+        // ── Kill banner (NO slow-mo, slow-mo is only for R) ──
+        camera.killEvents.push({
+          killerName: killer.fighter.name,
+          victimName: m.fighter.name,
+          killerThumb: killer.fighter.thumbnailUrl,
+          victimThumb: m.fighter.thumbnailUrl,
+          frame,
+        });
+
+        // ── Ult gauge: big charge on kill (+30) ──
+        if (!killer.ultFired) {
+          killer.ultGauge = Math.min(100, killer.ultGauge + 15);
+        }
+
+        const absorbRate = 0.2;
 
         const absorbHp = Math.round(m.maxHp * absorbRate);
         const oldMaxHp = killer.maxHp;
@@ -594,17 +1154,105 @@ function physicsStep(
     rings[i].life--;
     if (rings[i].life <= 0) rings.splice(i, 1);
   }
+
+  // ── Projectile homing + collision ──
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.life--;
+    if (p.life <= 0) { projectiles.splice(i, 1); continue; }
+
+    // Homing: steer toward target (skip for bullets — they fly straight)
+    if (p.type !== "bullet") {
+      const tgt = alive.find(m => m.fighter.channelId === p.targetId);
+      if (tgt) {
+        const dx = tgt.x - p.x, dy = tgt.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 1) {
+          const steer = 0.35;
+          p.vx += (dx / dist) * steer;
+          p.vy += (dy / dist) * steer;
+        }
+        // Hit detection
+        if (dist < tgt.radius + p.size) {
+          tgt.hp -= p.damage;
+          tgt.flashTimer = 12;
+          texts.push({ x: tgt.x, y: tgt.y - tgt.baseRadius - 12, text: `-${p.damage}`, color: p.color, life: 40, size: 16 });
+          rings.push({ x: p.x, y: p.y, radius: 3, maxRadius: p.size * 4, life: 14, maxLife: 14, color: p.color, lineWidth: 3 });
+          for (let k = 0; k < 6; k++) { const a = Math.random() * Math.PI * 2; particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * 3, vy: Math.sin(a) * 3, life: 15, color: p.color, size: 2 + Math.random() * 2 }); }
+          shake.value = Math.max(shake.value, 4);
+          projectiles.splice(i, 1);
+          continue;
+        }
+      }
+    } else {
+      // Bullet: straight-line collision with ANY enemy
+      for (const tgt of alive) {
+        if (tgt.fighter.channelId === p.ownerId) continue;
+        const dx = tgt.x - p.x, dy = tgt.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < tgt.radius + p.size) {
+          tgt.hp -= p.damage;
+          tgt.flashTimer = 8;
+          texts.push({ x: tgt.x, y: tgt.y - tgt.baseRadius - 12, text: `-${p.damage}`, color: p.color, life: 35, size: 14 });
+          for (let k = 0; k < 3; k++) { const a = Math.random() * Math.PI * 2; particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * 2, vy: Math.sin(a) * 2, life: 10, color: "#fff", size: 1.5 + Math.random() * 1.5 }); }
+          shake.value = Math.max(shake.value, 2);
+          projectiles.splice(i, 1);
+          break;
+        }
+      }
+      if (!projectiles[i] || projectiles[i] !== p) continue; // was spliced
+    }
+
+    // Speed cap (higher for bullets)
+    const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    const maxPSpd = p.type === "bullet" ? 14 : 6;
+    if (spd > maxPSpd) { p.vx = (p.vx / spd) * maxPSpd; p.vy = (p.vy / spd) * maxPSpd; }
+
+    p.x += p.vx; p.y += p.vy;
+    // Trail particle
+    if (frame % 2 === 0) particles.push({ x: p.x, y: p.y, vx: (Math.random() - 0.5) * 1.5, vy: (Math.random() - 0.5) * 1.5, life: 10, color: p.color, size: p.size * 0.5 });
+  }
+
+  // ── SlashLine life countdown ──
+  for (let i = slashLines.length - 1; i >= 0; i--) {
+    slashLines[i].life--;
+    if (slashLines[i].life <= 0) slashLines.splice(i, 1);
+  }
 }
 
 /* ─── Canvas draw ─── */
 function drawFrame(
   ctx: CanvasRenderingContext2D,
   marbles: Marble[], texts: FloatingText[], particles: Particle[], rings: Ring[],
+  projectiles: Projectile[], slashLines: SlashLine[],
   W: number, H: number, frame: number,
   thumbMap: Map<string, HTMLImageElement>,
   shake: number,
+  camera: Camera,
 ) {
   ctx.save();
+
+  // ── Camera: smooth follow + zoom ──
+  const lerpSpd = 0.06;
+  camera.x += (camera.targetX - camera.x) * lerpSpd;
+  camera.y += (camera.targetY - camera.y) * lerpSpd;
+  camera.zoom += (camera.targetZoom - camera.zoom) * lerpSpd;
+
+  // When slow-mo ends, ease back to full view
+  if (camera.slowMo <= 0) {
+    camera.targetX = W / 2;
+    camera.targetY = H / 2;
+    camera.targetZoom = 1;
+  }
+
+  const zoom = camera.zoom;
+  const camX = camera.x;
+  const camY = camera.y;
+
+  // Apply camera transform
+  ctx.translate(W / 2, H / 2);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-camX, -camY);
 
   if (shake > 0.3) {
     const sx = (Math.random() - 0.5) * shake * 2.5;
@@ -613,7 +1261,7 @@ function drawFrame(
   }
 
   ctx.fillStyle = "#0a0a0a";
-  ctx.fillRect(-10, -10, W + 20, H + 20);
+  ctx.fillRect(-W, -H, W * 3, H * 3);
 
   const gridAlpha = 0.12 + Math.sin(frame * 0.01) * 0.04;
   ctx.strokeStyle = `rgba(63, 63, 70, ${gridAlpha})`;
@@ -766,6 +1414,47 @@ function drawFrame(
     ctx.stroke();
     ctx.restore();
 
+    // ── Element glow ring ──
+    if (m.fighter.element !== "neutral") {
+      const eInfo = ELEMENT_INFO[m.fighter.element];
+      const elPulse = 0.2 + Math.sin(frame * 0.08 + m.fighter.channelId.charCodeAt(1)) * 0.1;
+      ctx.save();
+      ctx.globalAlpha = elPulse;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = eInfo.glow;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+
+      // ── Element badge on forehead ──
+      const badgeR = Math.max(7, Math.round(displayR * 0.32));
+      const badgeX = m.x;
+      const badgeY = m.y - displayR + badgeR * 0.3;
+      // Colored circle background
+      ctx.save();
+      ctx.shadowColor = eInfo.color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+      ctx.fillStyle = eInfo.color;
+      ctx.fill();
+      // Dark inner border
+      ctx.beginPath();
+      ctx.arc(badgeX, badgeY, badgeR - 1, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+      // Korean character label (불/물/풍/땅/빛/암)
+      const badgeFontSize = Math.max(8, Math.round(badgeR * 1.2));
+      ctx.font = `bold ${badgeFontSize}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(eInfo.nameKo, badgeX, badgeY + 1);
+    }
+
     const barW = Math.max(displayR * 2, 30);
     const barH = 5;
     const barX = m.x - barW / 2;
@@ -784,26 +1473,79 @@ function drawFrame(
       ctx.fillRect(barX, barY, barW * hpPct, barH);
     }
 
+    // ── R Gauge bar (below HP bar) ──
+    const ultH = 3;
+    const ultY = barY + barH + 2;
+    if (!m.ultFired) {
+      const ultPct = Math.min(1, m.ultGauge / 100);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.fillRect(barX - 1, ultY - 0.5, barW + 2, ultH + 1);
+      ctx.fillStyle = "#1c1917";
+      ctx.fillRect(barX, ultY, barW, ultH);
+      if (ultPct > 0) {
+        const ultGrad = ctx.createLinearGradient(barX, ultY, barX + barW * ultPct, ultY);
+        ultGrad.addColorStop(0, "#fbbf24");
+        ultGrad.addColorStop(1, "#f97316");
+        ctx.fillStyle = ultGrad;
+        ctx.fillRect(barX, ultY, barW * ultPct, ultH);
+      }
+      // "R" label on right end
+      if (ultPct >= 0.95) {
+        // Pulsing glow when almost full
+        const pulse2 = 0.5 + Math.sin(frame * 0.3) * 0.5;
+        ctx.save();
+        ctx.globalAlpha = pulse2;
+        ctx.shadowColor = "#fbbf24";
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = "#fbbf24";
+        ctx.fillRect(barX, ultY, barW, ultH);
+        ctx.restore();
+      }
+      ctx.font = "bold 7px system-ui, sans-serif";
+      ctx.fillStyle = ultPct >= 0.95 ? "#fbbf24" : "#71717a";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText("R", barX + barW + 8, ultY + ultH / 2);
+    } else {
+      // R fired — show "R" icon with color
+      const rSkill2 = m.fighter.skills.find(s => s.slot === "R");
+      ctx.font = "bold 8px system-ui, sans-serif";
+      ctx.fillStyle = rSkill2 ? rSkill2.color : "#fbbf24";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("★R", barX + barW / 2, ultY + ultH / 2 + 1);
+    }
+
+    const nameY = ultY + ultH + 2;
     const fSize = Math.max(9, Math.round(displayR * 0.35));
     ctx.font = `bold ${fSize}px system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.fillText(m.fighter.name, m.x + 0.5, barY + barH + 3.5);
+    ctx.fillText(m.fighter.name, m.x + 0.5, nameY + 0.5);
     ctx.fillStyle = "#d4d4d8";
-    ctx.fillText(m.fighter.name, m.x, barY + barH + 3);
+    ctx.fillText(m.fighter.name, m.x, nameY);
 
     if (m.skillBuff > 0) {
-      const sk = m.fighter.skill;
-      const pulse = 0.35 + Math.sin(frame * 0.2) * 0.2;
+      // Draw glowing ring for each active skill
+      const rSkill = m.fighter.skills.find(s => s.slot === "R");
+      const ringColor = rSkill ? rSkill.color : "#fbbf24";
+      const pulse = 0.4 + Math.sin(frame * 0.2) * 0.25;
       ctx.save();
       ctx.globalAlpha = pulse;
-      ctx.shadowColor = sk.color;
-      ctx.shadowBlur = 20;
+      ctx.shadowColor = ringColor;
+      ctx.shadowBlur = 25;
       ctx.beginPath();
-      ctx.arc(m.x, m.y, displayR + 8 + Math.sin(frame * 0.12) * 3, 0, Math.PI * 2);
-      ctx.strokeStyle = sk.color;
-      ctx.lineWidth = 3;
+      ctx.arc(m.x, m.y, displayR + 10 + Math.sin(frame * 0.12) * 4, 0, Math.PI * 2);
+      ctx.strokeStyle = ringColor;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      // Inner ring
+      ctx.globalAlpha = pulse * 0.5;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
     }
@@ -819,6 +1561,71 @@ function drawFrame(
       ctx.stroke();
       ctx.restore();
     }
+    // (Skill indicators removed — R gauge bar + floating text for Q/W/E are enough)
+  }
+
+  // ── Render projectiles (missiles / bullets) ──
+  for (const pj of projectiles) {
+    ctx.save();
+    const pAlpha = Math.min(1, pj.life / 20);
+    ctx.globalAlpha = pAlpha;
+    ctx.shadowColor = pj.color;
+    ctx.shadowBlur = pj.type === "bullet" ? 6 : 12;
+    const ang = Math.atan2(pj.vy, pj.vx);
+    ctx.translate(pj.x, pj.y);
+    ctx.rotate(ang);
+    if (pj.type === "bullet") {
+      // Bullet: small elongated tracer
+      ctx.fillStyle = pj.color;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pj.size * 1.8, pj.size * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.ellipse(pj.size * 0.5, 0, pj.size * 0.8, pj.size * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Missile body
+      ctx.fillStyle = pj.color;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pj.size, pj.size * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(pj.size * 0.3, 0, pj.size * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ── Render slash lines ──
+  for (const sl of slashLines) {
+    const progress = 1 - sl.life / sl.maxLife; // 0→1
+    const drawPct = Math.min(1, progress * 3);  // line draws in first 1/3
+    const fadeAlpha = sl.life < sl.maxLife * 0.4 ? sl.life / (sl.maxLife * 0.4) : 1;
+    const cx = sl.x1 + (sl.x2 - sl.x1) * drawPct;
+    const cy = sl.y1 + (sl.y2 - sl.y1) * drawPct;
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    // Outer glow
+    ctx.shadowColor = sl.color;
+    ctx.shadowBlur = 20;
+    ctx.strokeStyle = sl.color;
+    ctx.lineWidth = sl.width;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(sl.x1, sl.y1);
+    ctx.lineTo(cx, cy);
+    ctx.stroke();
+    // White core
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(1, sl.width * 0.35);
+    ctx.beginPath();
+    ctx.moveTo(sl.x1, sl.y1);
+    ctx.lineTo(cx, cy);
+    ctx.stroke();
+    ctx.restore();
   }
 
   for (const p of particles) {
@@ -861,7 +1668,279 @@ function drawFrame(
     ctx.fillText(ft.text, ft.x, ft.y);
   }
   ctx.globalAlpha = 1;
+
+  // ── Cut-in darkness: dim everything except the R-user ──
+  if (camera.cutIn) {
+    const ci = camera.cutIn;
+    const ciAge = frame - ci.startFrame;
+    const ciProgress = ciAge / ci.duration;
+    const darkAlpha = ciProgress < 0.15 ? ciProgress / 0.15 * 0.8 : ciProgress > 0.8 ? (1 - ciProgress) / 0.2 * 0.8 : 0.8;
+
+    // Find the R-user marble (still in world-space coords)
+    const ultMarble = marbles.find(m2 => m2.fighter.channelId === ci.channelId && m2.alive);
+
+    // Dark overlay with spotlight cutout
+    ctx.save();
+    ctx.globalAlpha = darkAlpha;
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(-W, -H, W * 3, H * 3);
+
+    if (ultMarble) {
+      // Punch out a bright circle around the R-user
+      ctx.globalCompositeOperation = "destination-out";
+      const spotR = ultMarble.baseRadius * 3.5;
+      const spotGrad = ctx.createRadialGradient(ultMarble.x, ultMarble.y, ultMarble.baseRadius * 0.5, ultMarble.x, ultMarble.y, spotR);
+      spotGrad.addColorStop(0, "rgba(0,0,0,1)");
+      spotGrad.addColorStop(0.7, "rgba(0,0,0,0.8)");
+      spotGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = spotGrad;
+      ctx.fillRect(ultMarble.x - spotR, ultMarble.y - spotR, spotR * 2, spotR * 2);
+      ctx.globalCompositeOperation = "source-over";
+
+      // Colored glow ring around the R-user
+      ctx.globalAlpha = 0.4 + Math.sin(ciAge * 0.15) * 0.2;
+      ctx.beginPath();
+      ctx.arc(ultMarble.x, ultMarble.y, ultMarble.baseRadius * 2.5, 0, Math.PI * 2);
+      ctx.strokeStyle = ci.skillColor;
+      ctx.lineWidth = 4;
+      ctx.shadowColor = ci.skillColor;
+      ctx.shadowBlur = 30;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  // End of world-space drawing
   ctx.restore();
+
+  // ── Kill Banner (screen-space, outside camera transform) ──
+  const now = frame;
+  const bannerDuration = 120; // frames to show banner
+  const activeBanners = camera.killEvents.filter(ke => now - ke.frame < bannerDuration);
+  // Keep only recent 5
+  while (camera.killEvents.length > 5) camera.killEvents.shift();
+
+  for (let bi = 0; bi < activeBanners.length; bi++) {
+    const ke = activeBanners[bi];
+    const age = now - ke.frame;
+    const fadeIn = Math.min(1, age / 12);
+    const fadeOut = age > bannerDuration - 20 ? Math.max(0, (bannerDuration - age) / 20) : 1;
+    const alpha = fadeIn * fadeOut;
+
+    // Slide in from right
+    const slideX = (1 - fadeIn) * 100;
+
+    const bx = W - 210 - slideX;
+    const by = 12 + bi * 52;
+
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.92;
+
+    // Banner background
+    ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+    ctx.beginPath();
+    ctx.roundRect(bx, by, 200, 44, 8);
+    ctx.fill();
+
+    // Red accent line on left
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.roundRect(bx, by, 4, 44, [8, 0, 0, 8]);
+    ctx.fill();
+
+    // Killer name
+    ctx.font = "bold 11px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(ke.killerName.slice(0, 10), bx + 12, by + 14);
+
+    // Sword icon
+    ctx.fillStyle = "#ef4444";
+    ctx.font = "bold 14px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("⚔", bx + 100, by + 22);
+
+    // Victim name
+    ctx.font = "bold 11px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#71717a";
+    ctx.fillText(ke.victimName.slice(0, 10), bx + 192, by + 14);
+
+    // "ELIMINATED" text
+    ctx.font = "bold 8px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ef4444";
+    ctx.fillText("ELIMINATED", bx + 100, by + 38);
+
+    ctx.restore();
+  }
+
+  // ── Slow-mo vignette effect ──
+  if (camera.slowMo > 0) {
+    const vigAlpha = Math.min(0.35, camera.slowMo / 90 * 0.35);
+    const grad = ctx.createRadialGradient(W / 2, H / 2, W * 0.2, W / 2, H / 2, W * 0.7);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(1, `rgba(0,0,0,${vigAlpha})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── CUT-IN: anime-style profile + skill name ──
+  if (camera.cutIn) {
+    const ci = camera.cutIn;
+    const age = frame - ci.startFrame;
+    if (age > ci.duration) {
+      camera.cutIn = null;
+    } else {
+      const progress = age / ci.duration; // 0→1
+
+      // Phase timings
+      const slideInEnd = 0.15;   // 0~15% slide in
+      const holdEnd = 0.75;      // 15~75% hold
+      // 75~100% slide out
+
+      let slideT: number; // 0=off-screen, 1=in-position
+      if (progress < slideInEnd) {
+        // Ease out (fast start, slow end)
+        const t = progress / slideInEnd;
+        slideT = 1 - Math.pow(1 - t, 3);
+      } else if (progress < holdEnd) {
+        slideT = 1;
+      } else {
+        // Ease in (slow start, fast end)
+        const t = (progress - holdEnd) / (1 - holdEnd);
+        slideT = 1 - Math.pow(t, 2);
+      }
+
+      const alpha = progress < slideInEnd
+        ? Math.min(1, (progress / slideInEnd) * 2)
+        : progress > holdEnd
+          ? Math.max(0, 1 - ((progress - holdEnd) / (1 - holdEnd)) * 2)
+          : 1;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // ── Dark cinematic bars (top + bottom) ──
+      const barH2 = H * 0.12;
+      const barAlpha = alpha * 0.85;
+      ctx.fillStyle = `rgba(0, 0, 0, ${barAlpha})`;
+      ctx.fillRect(0, 0, W, barH2);
+      ctx.fillRect(0, H - barH2, W, barH2);
+
+      // ── Diagonal slash background ──
+      const slashX = W * 0.38;
+      const skewPx = H * 0.15;
+      ctx.fillStyle = ci.skillColor + "30";
+      ctx.beginPath();
+      ctx.moveTo(slashX - skewPx + (1 - slideT) * -W, 0);
+      ctx.lineTo(slashX + W * 0.35 - skewPx + (1 - slideT) * -W, 0);
+      ctx.lineTo(slashX + W * 0.35 + skewPx + (1 - slideT) * -W, H);
+      ctx.lineTo(slashX + skewPx + (1 - slideT) * -W, H);
+      ctx.closePath();
+      ctx.fill();
+
+      // ── Accent line ──
+      ctx.strokeStyle = ci.skillColor;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = alpha * 0.8;
+      ctx.beginPath();
+      const lineX = slashX - skewPx + (1 - slideT) * -W;
+      ctx.moveTo(lineX, 0);
+      ctx.lineTo(lineX + skewPx * 2, H);
+      ctx.stroke();
+      ctx.globalAlpha = alpha;
+
+      // ── Profile thumbnail (large, clipped to circle) ──
+      const thumbSize = Math.min(W * 0.22, H * 0.4);
+      const thumbCx = W * 0.2 + (1 - slideT) * -W * 0.5;
+      const thumbCy = H * 0.5;
+
+      // Glow behind thumbnail
+      ctx.save();
+      ctx.shadowColor = ci.skillColor;
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.arc(thumbCx, thumbCy, thumbSize / 2 + 4, 0, Math.PI * 2);
+      ctx.fillStyle = ci.skillColor + "40";
+      ctx.fill();
+      ctx.restore();
+
+      // Thumbnail circle
+      const thumb2 = thumbMap.get(ci.channelId);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(thumbCx, thumbCy, thumbSize / 2, 0, Math.PI * 2);
+      ctx.clip();
+      if (thumb2 && thumb2.complete && thumb2.naturalWidth > 0) {
+        try {
+          ctx.drawImage(thumb2, thumbCx - thumbSize / 2, thumbCy - thumbSize / 2, thumbSize, thumbSize);
+        } catch { /* ignore */ }
+      } else {
+        ctx.fillStyle = "#27272a";
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // Circle border
+      ctx.beginPath();
+      ctx.arc(thumbCx, thumbCy, thumbSize / 2, 0, Math.PI * 2);
+      ctx.strokeStyle = ci.skillColor;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // ── Channel name ──
+      const textX = W * 0.42 + (1 - slideT) * -W * 0.3;
+      const nameSize = Math.min(28, W * 0.045);
+      ctx.font = `bold ${nameSize}px system-ui, sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      // Shadow
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillText(ci.name, textX + 2, H * 0.4 + 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(ci.name, textX, H * 0.4);
+
+      // ── "ULTIMATE" label ──
+      const labelSize = Math.min(11, W * 0.018);
+      ctx.font = `bold ${labelSize}px system-ui, sans-serif`;
+      ctx.fillStyle = ci.skillColor;
+      ctx.letterSpacing = "3px";
+      ctx.fillText("U L T I M A T E", textX, H * 0.4 - nameSize * 0.9);
+      ctx.letterSpacing = "0px";
+
+      // ── Skill name (big, colored) ──
+      const skillSize = Math.min(38, W * 0.06);
+      ctx.font = `900 ${skillSize}px system-ui, sans-serif`;
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillText(ci.skillName, textX + 2, H * 0.4 + nameSize * 1.1 + 2);
+      ctx.fillStyle = ci.skillColor;
+      ctx.shadowColor = ci.skillColor;
+      ctx.shadowBlur = 15;
+      ctx.fillText(ci.skillName, textX, H * 0.4 + nameSize * 1.1);
+      ctx.shadowBlur = 0;
+
+      // ── Decorative sparkle particles along slash ──
+      if (progress > slideInEnd && progress < holdEnd) {
+        for (let k = 0; k < 3; k++) {
+          const py = Math.random() * H;
+          const px = lineX + skewPx * (py / H) + Math.random() * 20 - 10;
+          ctx.beginPath();
+          ctx.arc(px, py, 1.5 + Math.random() * 2, 0, Math.PI * 2);
+          ctx.fillStyle = "#ffffff";
+          ctx.globalAlpha = alpha * (0.3 + Math.random() * 0.5);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════
@@ -897,7 +1976,6 @@ const L = {
     statNote: "* 구독자 = HP, 평균 조회수 = ATK, 업로드 수 = SPD",
     evWin: (name: string) => `[속보] ${name} 최종 우승!`,
     shareText: (winner: string, names: string[]) => `유튜버 배틀로얄! ${names.join(" vs ")}\n우승: ${winner}`,
-    all: "전체", "kr-ent": "한국", "kr-edu": "교육", global: "글로벌", gaming: "게임", music: "음악",
     subsLabel: "구독자", viewsLabel: "조회수", videosLabel: "동영상",
     searchResult: "검색 결과",
     country: "유튜버",
@@ -930,7 +2008,6 @@ const L = {
     statNote: "* Subscribers = HP, Avg Views = ATK, Videos = SPD",
     evWin: (name: string) => `[BREAKING] ${name} wins!`,
     shareText: (winner: string, names: string[]) => `YouTuber Battle Royale! ${names.join(" vs ")}\nWinner: ${winner}`,
-    all: "All", "kr-ent": "Korea", "kr-edu": "Education", global: "Global", gaming: "Gaming", music: "Music",
     subsLabel: "Subs", viewsLabel: "Views", videosLabel: "Videos",
     searchResult: "Search Results",
     country: "YouTuber",
@@ -947,15 +2024,16 @@ export default function YoutuberBattleClient() {
   const t = isKo ? L.ko : L.en;
   const searchParams = useSearchParams();
 
+  interface SelectedChannel { name: string; thumbnailUrl: string; element?: ElementType }
+
   const [phase, setPhase] = useState<"lobby" | "loading" | "battle" | "victory">("lobby");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Map<string, SelectedChannel>>(new Map());
   const [fighters, setFighters] = useState<Fighter[]>([]);
   const [speed, setSpeedState] = useState(1);
   const [introPhase, setIntroPhase] = useState<"none" | "cards" | "fight">("none");
   const [battleLogs, setBattleLogs] = useState<string[]>([]);
   const [aliveCnt, setAliveCnt] = useState(0);
   const [lobbyQuery, setLobbyQuery] = useState("");
-  const [lobbyTab, setLobbyTab] = useState<"all" | "kr-ent" | "kr-edu" | "global" | "gaming" | "music">("all");
   const [searchResults, setSearchResults] = useState<{ channelId: string; name: string; thumbnailUrl: string }[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -967,8 +2045,11 @@ export default function YoutuberBattleClient() {
   const textsRef = useRef<FloatingText[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const ringsRef = useRef<Ring[]>([]);
+  const projectilesRef = useRef<Projectile[]>([]);
+  const slashLinesRef = useRef<SlashLine[]>([]);
   const cooldownRef = useRef<Map<string, number>>(new Map());
   const shakeRef = useRef({ value: 0 });
+  const cameraRef = useRef<Camera>({ x: 0, y: 0, targetX: 0, targetY: 0, zoom: 1, targetZoom: 1, slowMo: 0, killEvents: [], cutIn: null });
   const pendingLogsRef = useRef<string[]>([]);
   const frameRef = useRef(0);
   const animRef = useRef(0);
@@ -982,43 +2063,41 @@ export default function YoutuberBattleClient() {
   const thumbMapRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const filteredPool = useMemo(() => {
-    let list = [...YOUTUBERS];
-    if (lobbyTab !== "all") list = list.filter(c => c.category === lobbyTab);
-    if (lobbyQuery.trim()) {
-      const q = lobbyQuery.trim().toLowerCase();
-      list = list.filter(c =>
-        c.name.toLowerCase().includes(q) ||
-        c.channelId.toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [lobbyQuery, lobbyTab]);
-
-  useEffect(() => {
-    const sParam = searchParams.get("s");
-    if (sParam && phase === "lobby") {
-      const codes = sParam.split(",").map(c => c.trim()).filter(Boolean);
-      if (codes.length >= 2) setSelected(new Set(codes.slice(0, 20)));
-    }
-  }, [searchParams, phase]);
-
   useEffect(() => { speedRef.current = speed; }, [speed]);
   useEffect(() => { isKoRef.current = isKo; }, [isKo]);
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" }); }, [battleLogs.length]);
 
-  const toggle = useCallback((channelId: string) => {
+  const toggleChannel = useCallback((channelId: string, name: string, thumbnailUrl: string) => {
     setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(channelId)) next.delete(channelId);
-      else if (next.size < 20) next.add(channelId);
+      const next = new Map(prev);
+      if (next.has(channelId)) {
+        next.delete(channelId);
+      } else if (next.size < 20) {
+        next.set(channelId, { name, thumbnailUrl });
+        // Fetch element in background
+        fetchChannelData([channelId]).then(map => {
+          const d = map.get(channelId);
+          if (d) {
+            const elem = getChannelElement(d.topicIds);
+            setSelected(p => {
+              const n = new Map(p);
+              const existing = n.get(channelId);
+              if (existing) n.set(channelId, { ...existing, element: elem });
+              return n;
+            });
+          }
+        }).catch(() => {});
+      }
       return next;
     });
   }, []);
 
-  const randomPick = useCallback((count = 8) => {
-    const shuffled = [...YOUTUBERS].sort(() => Math.random() - 0.5);
-    setSelected(new Set(shuffled.slice(0, count).map(c => c.channelId)));
+  const removeChannel = useCallback((channelId: string) => {
+    setSelected(prev => {
+      const next = new Map(prev);
+      next.delete(channelId);
+      return next;
+    });
   }, []);
 
   const finishBattle = useCallback(() => {
@@ -1045,7 +2124,7 @@ export default function YoutuberBattleClient() {
     let safety = 0;
     while (marblesRef.current.filter(m => m.alive).length > 1 && safety < 100000) {
       frameRef.current++;
-      physicsStep(marblesRef.current, w, h, cooldownRef.current, textsRef.current, particlesRef.current, ringsRef.current, pendingLogsRef.current, ko, frameRef.current, shakeRef.current);
+      physicsStep(marblesRef.current, w, h, cooldownRef.current, textsRef.current, particlesRef.current, ringsRef.current, projectilesRef.current, slashLinesRef.current, pendingLogsRef.current, ko, frameRef.current, shakeRef.current, cameraRef.current);
       safety++;
     }
     finishBattle();
@@ -1055,12 +2134,12 @@ export default function YoutuberBattleClient() {
     if (selected.size < 2) return;
     setPhase("loading");
     try {
-      const channelIds = Array.from(selected);
-      const presetMap = new Map(YOUTUBERS.map(p => [p.channelId, p]));
+      const channelIds = Array.from(selected.keys());
       const channelDataMap = await fetchChannelData(channelIds);
       const thumbFighters = channelIds.map(id => {
         const d = channelDataMap.get(id);
-        return { channelId: id, thumbnailUrl: d?.thumbnailUrl ?? "" };
+        const sel = selected.get(id);
+        return { channelId: id, thumbnailUrl: d?.thumbnailUrl ?? sel?.thumbnailUrl ?? "" };
       });
       const thumbMap = await preloadThumbnails(thumbFighters);
 
@@ -1068,29 +2147,22 @@ export default function YoutuberBattleClient() {
       for (let i = 0; i < channelIds.length; i++) {
         const id = channelIds[i];
         const data = channelDataMap.get(id);
-        const preset = presetMap.get(id);
-        if (!data && !preset) continue;
+        const sel = selected.get(id);
+        if (!data) continue;
 
-        const cd = data ?? {
-          channelId: id,
-          name: preset!.name,
-          thumbnailUrl: "",
-          publishedAt: "2020-01-01",
-          subscriberCount: 1000000,
-          viewCount: 100000000,
-          videoCount: 100,
-          avgViewsPerVideo: 1000000,
-          yearsActive: 5,
-        };
-        const stats = toGameStats(cd);
+        const stats = toGameStats(data);
         const palette = PALETTE[i % PALETTE.length];
+        const skills = getYoutuberSkills(id);
+        const element = getChannelElement(data.topicIds);
 
         loaded.push({
           channelId: id,
-          name: cd.name,
-          thumbnailUrl: cd.thumbnailUrl,
+          name: data.name,
+          thumbnailUrl: data.thumbnailUrl || sel?.thumbnailUrl || "",
           stats,
-          skill: getYoutuberSkill(id),
+          skill: skills[0],
+          skills,
+          element,
           canvasColor: palette.color,
           canvasBg: palette.bg,
           hp: stats.maxHp,
@@ -1099,9 +2171,9 @@ export default function YoutuberBattleClient() {
           totalDamage: 0,
           critsLanded: 0,
           deathOrder: 0,
-          subsLabel: formatCount(cd.subscriberCount),
-          viewsLabel: formatCount(cd.viewCount),
-          videosLabel: formatCount(cd.videoCount),
+          subsLabel: formatCount(data.subscriberCount),
+          viewsLabel: formatCount(data.viewCount),
+          videosLabel: formatCount(data.videoCount),
         });
       }
 
@@ -1126,6 +2198,7 @@ export default function YoutuberBattleClient() {
       console.error(err);
       setPhase("lobby");
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, t.notEnough]);
 
   useEffect(() => {
@@ -1148,8 +2221,11 @@ export default function YoutuberBattleClient() {
     textsRef.current = [];
     particlesRef.current = [];
     ringsRef.current = [];
+    projectilesRef.current = [];
+    slashLinesRef.current = [];
     cooldownRef.current = new Map();
     shakeRef.current = { value: 0 };
+    cameraRef.current = { x: w / 2, y: h / 2, targetX: w / 2, targetY: h / 2, zoom: 1, targetZoom: 1, slowMo: 0, killEvents: [], cutIn: null };
     frameRef.current = 0;
     pendingLogsRef.current = [];
 
@@ -1157,14 +2233,34 @@ export default function YoutuberBattleClient() {
       const ctx = canvas.getContext("2d");
       if (!ctx || doneRef.current) return;
 
-      for (let s = 0; s < speedRef.current; s++) {
+      const cam = cameraRef.current;
+      const isCutIn = cam.cutIn !== null;
+
+      // ── During cut-in: FULL FREEZE (no physics, no shake) ──
+      // ── During slow-mo (no cut-in): reduced tick rate ──
+      let ticksThisFrame = speedRef.current;
+      if (isCutIn) {
+        ticksThisFrame = 0; // complete freeze
+        shakeRef.current.value = 0; // no shake during cut-in
+      } else if (cam.slowMo > 0) {
+        cam.slowMo--;
+        ticksThisFrame = frameRef.current % 3 === 0 ? 1 : 0;
+      }
+
+      for (let s = 0; s < ticksThisFrame; s++) {
         frameRef.current++;
-        physicsStep(marblesRef.current, w, h, cooldownRef.current, textsRef.current, particlesRef.current, ringsRef.current, pendingLogsRef.current, isKoRef.current, frameRef.current, shakeRef.current);
+        physicsStep(marblesRef.current, w, h, cooldownRef.current, textsRef.current, particlesRef.current, ringsRef.current, projectilesRef.current, slashLinesRef.current, pendingLogsRef.current, isKoRef.current, frameRef.current, shakeRef.current, cam);
+      }
+
+      // Cut-in advances by real frames (not game frames)
+      if (isCutIn) {
+        // Advance cut-in timer using a real-time counter
+        cam.cutIn!.startFrame--; // trick: decrement startFrame to simulate passage
       }
 
       ctx.save();
       ctx.scale(dpr, dpr);
-      drawFrame(ctx, marblesRef.current, textsRef.current, particlesRef.current, ringsRef.current, w, h, frameRef.current, thumbMapRef.current, shakeRef.current.value);
+      drawFrame(ctx, marblesRef.current, textsRef.current, particlesRef.current, ringsRef.current, projectilesRef.current, slashLinesRef.current, w, h, frameRef.current, thumbMapRef.current, isCutIn ? 0 : shakeRef.current.value, cam);
       ctx.restore();
 
       if (marblesRef.current.filter(m => m.alive).length <= 1) {
@@ -1201,6 +2297,7 @@ export default function YoutuberBattleClient() {
     fightersRef.current = [];
     marblesRef.current = [];
     setSearchResults([]);
+    setSelected(new Map());
   }, []);
 
   const buildShareUrl = useCallback(() => {
@@ -1226,7 +2323,8 @@ export default function YoutuberBattleClient() {
   }, [fighters, buildShareUrl, t]);
 
   const rematch = useCallback(() => {
-    const codes = fighters.map(f => f.channelId);
+    const map = new Map<string, SelectedChannel>();
+    for (const f of fighters) map.set(f.channelId, { name: f.name, thumbnailUrl: f.thumbnailUrl, element: f.element });
     cancelAnimationFrame(animRef.current);
     clearInterval(logSyncRef.current);
     setPhase("lobby");
@@ -1239,7 +2337,7 @@ export default function YoutuberBattleClient() {
     fightersRef.current = [];
     marblesRef.current = [];
     setCopied(false);
-    setSelected(new Set(codes));
+    setSelected(map);
   }, [fighters]);
 
   useEffect(() => {
@@ -1266,39 +2364,54 @@ export default function YoutuberBattleClient() {
               <Youtube size={20} /> {t.fighters} ({fighters.length}) <Youtube size={20} />
             </h2>
             {fighters.length <= 10 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-w-2xl w-full">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-3xl w-full">
                 {fighters.map((f) => (
                   <div key={f.channelId} className="bg-zinc-900/90 rounded-xl p-2.5 border border-zinc-700/50">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <img src={f.thumbnailUrl || undefined} alt="" width={32} height={32} className="rounded-full object-cover bg-zinc-800" />
-                      <div className="min-w-0">
-                        <span className="text-white text-xs font-bold block truncate">{f.name}</span>
-                        <span className="text-[9px] font-medium block truncate" style={{ color: f.skill.color }}>{isKo ? f.skill.nameKo : f.skill.nameEn}</span>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <img src={f.thumbnailUrl || undefined} alt="" width={36} height={36} className="rounded-full object-cover bg-zinc-800 border-2 border-zinc-700" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <span className="text-white text-xs font-bold block truncate">{f.name}</span>
+                          {f.element !== "neutral" && (() => {
+                            const ei = ELEMENT_INFO[f.element];
+                            return <span className="text-[9px] px-1 rounded font-bold shrink-0" style={{ backgroundColor: ei.color + "25", color: ei.color }}>{ei.icon} {ei.nameKo}</span>;
+                          })()}
+                        </div>
+                        <div className="flex gap-2 text-[9px]">
+                          <span className="text-zinc-500">HP <span className="text-white font-bold">{f.stats.maxHp}</span></span>
+                          <span className="text-zinc-500">ATK <span className="text-red-400 font-bold">{f.stats.atk}</span></span>
+                          <span className="text-zinc-500">SPD <span className="text-green-400 font-bold">{f.stats.spd}</span></span>
+                        </div>
                       </div>
                     </div>
-                    <div className="text-[8px] text-zinc-500 mb-1" style={{ color: f.skill.color + "99" }}>
-                      {isKo ? f.skill.descKo : f.skill.descEn}
-                    </div>
-                    <div className="grid grid-cols-4 gap-x-1 gap-y-0.5 text-[10px]">
-                      <span className="text-zinc-500">HP <span className="text-white font-bold">{f.stats.maxHp}</span></span>
-                      <span className="text-zinc-500">ATK <span className="text-red-400 font-bold">{f.stats.atk}</span></span>
-                      <span className="text-zinc-500">SPD <span className="text-green-400 font-bold">{f.stats.spd}</span></span>
-                      <span className="text-zinc-500">CRT <span className="text-purple-400 font-bold">{f.stats.crit}%</span></span>
-                      <span className="text-zinc-500">DEF <span className="text-yellow-400 font-bold">{f.stats.def}</span></span>
-                      <span className="text-zinc-500">{t.subsLabel} <span className="text-cyan-400 font-bold">{f.subsLabel}</span></span>
+                    <div className="space-y-0.5">
+                      {f.skills.map((sk) => (
+                        <div key={sk.id} className="flex items-center gap-1">
+                          <span className="text-[9px] font-black w-3 shrink-0" style={{ color: sk.slot === "R" ? "#fbbf24" : sk.color }}>{sk.slot}</span>
+                          <span className="text-[9px] font-bold" style={{ color: sk.color }}>{isKo ? sk.nameKo : sk.nameEn}</span>
+                          <span className="text-[8px] text-zinc-500 truncate flex-1">{isKo ? sk.descKo : sk.descEn}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="max-w-2xl w-full">
+              <div className="max-w-3xl w-full">
                 <div className="flex flex-wrap justify-center gap-1.5">
                   {[...fighters].sort((a, b) => b.stats.maxHp - a.stats.maxHp).map((f) => (
                     <div key={f.channelId} className="bg-zinc-900/80 rounded-lg px-2 py-1.5 border border-zinc-700/40 flex items-center gap-1.5">
                       <img src={f.thumbnailUrl || undefined} alt="" width={24} height={24} className="rounded-full object-cover bg-zinc-800" />
                       <span className="text-white text-[10px] font-bold">{f.name}</span>
+                      {f.element !== "neutral" && (
+                        <span className="text-[8px]" title={ELEMENT_INFO[f.element].nameKo}>{ELEMENT_INFO[f.element].icon}</span>
+                      )}
                       <span className="text-zinc-500 text-[9px]">HP<span className="text-zinc-300 font-bold ml-0.5">{f.stats.maxHp}</span></span>
-                      <span className="text-[8px] font-medium" style={{ color: f.skill.color }}>{isKo ? f.skill.nameKo : f.skill.nameEn}</span>
+                      <div className="flex gap-0.5">
+                        {f.skills.map(sk => (
+                          <span key={sk.id} className="text-[7px] font-black px-1 rounded" style={{ backgroundColor: sk.color + "30", color: sk.color }}>{sk.slot}</span>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1360,7 +2473,13 @@ export default function YoutuberBattleClient() {
           <Trophy className="text-red-500 mb-3" size={48} />
           <div className="bg-gradient-to-br from-red-900/30 to-zinc-900 border border-red-600/40 rounded-2xl p-6 flex flex-col items-center gap-3 shadow-2xl shadow-red-500/10">
             <img src={winner?.thumbnailUrl || undefined} alt="" width={96} height={96} className="rounded-full object-cover bg-zinc-800 border-4 border-red-500/50 shadow-lg" />
-            <p className="text-2xl font-black text-white">{winner?.name}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-2xl font-black text-white">{winner?.name}</p>
+              {winner && winner.element !== "neutral" && (() => {
+                const ei = ELEMENT_INFO[winner.element];
+                return <span className="text-sm px-1.5 py-0.5 rounded font-bold" style={{ backgroundColor: ei.color + "25", color: ei.color }}>{ei.icon} {ei.nameKo}</span>;
+              })()}
+            </div>
             <span className="text-red-500 text-sm font-bold tracking-widest uppercase">{t.champion}</span>
           </div>
         </div>
@@ -1385,6 +2504,9 @@ export default function YoutuberBattleClient() {
                       <div className="flex items-center gap-1.5">
                         <img src={f.thumbnailUrl || undefined} alt="" width={24} height={24} className="rounded-full object-cover bg-zinc-800" />
                         <span className="text-white font-bold">{f.name}</span>
+                        {f.element !== "neutral" && (
+                          <span className="text-[9px]" title={ELEMENT_INFO[f.element].nameKo}>{ELEMENT_INFO[f.element].icon}</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-2 py-1.5 text-right text-zinc-300 font-mono">{f.totalDamage.toLocaleString()}</td>
@@ -1427,99 +2549,95 @@ export default function YoutuberBattleClient() {
         <p className="text-sm text-zinc-500 mt-1">{t.subtitle}</p>
       </div>
 
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">{t.pick}</p>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-red-600">{t.selected(selected.size)}</span>
-          <button onClick={() => randomPick(8)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-300 transition">
-            <Shuffle size={14} /> {t.random}
-          </button>
-        </div>
+      {/* Search */}
+      <div className="relative mb-4">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+        <input type="text" value={lobbyQuery} onChange={e => setLobbyQuery(e.target.value)}
+          placeholder={t.search}
+          className="w-full pl-10 pr-10 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-400 shadow-sm"
+        />
+        {searchLoading && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-zinc-400" />}
       </div>
 
-      <div className="flex items-center gap-2 mb-3">
-        <div className="flex-1 relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <input type="text" value={lobbyQuery} onChange={e => setLobbyQuery(e.target.value)}
-            placeholder={t.search}
-            className="w-full pl-8 pr-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-400"
-          />
-          {searchLoading && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-zinc-400" />}
-        </div>
-        <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden shrink-0">
-          {(["all", "kr-ent", "kr-edu", "global", "gaming", "music"] as const).map(tab => (
-            <button key={tab} onClick={() => setLobbyTab(tab)}
-              className={`px-2 py-2 text-xs font-bold transition ${lobbyTab === tab ? "bg-red-600 text-white" : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"}`}
-            >{t[tab]}</button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 max-h-[40vh] overflow-y-auto pr-1">
-        {filteredPool.map((item) => {
-          const channelId = item.channelId;
-          const name = item.name;
-          const sel = selected.has(channelId);
-          return (
-            <button key={channelId} onClick={() => toggle(channelId)}
-              className={`flex items-center gap-2 p-2 rounded-xl border transition-all text-left ${
-                sel ? "border-red-500 bg-red-50 dark:bg-red-950/40 ring-2 ring-red-300 shadow-sm"
-                    : "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-sm"
-              }`}
-            >
-              <div className="shrink-0 w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center">
-                <Youtube size={16} className="text-zinc-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">{name}</p>
-                <p className="text-[10px] truncate" style={{ color: getYoutuberSkill(channelId).color }}>
-                  {isKo ? getYoutuberSkill(channelId).nameKo : getYoutuberSkill(channelId).nameEn}
-                </p>
-              </div>
-              {sel && <Check size={14} className="text-red-600 shrink-0" />}
-            </button>
-          );
-        })}
-      </div>
-
+      {/* Search Results */}
       {lobbyQuery.trim().length > 0 && (
-        <>
+        <div className="mb-4">
           <p className="text-xs text-zinc-500 mb-2">{t.searchResult}</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6 max-h-[30vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[35vh] overflow-y-auto pr-1">
             {searchLoading ? (
-              <div className="col-span-full flex justify-center py-4">
-                <Loader2 size={20} className="animate-spin text-zinc-400" />
+              <div className="col-span-full flex justify-center py-6">
+                <Loader2 size={24} className="animate-spin text-zinc-400" />
               </div>
+            ) : searchResults.length === 0 ? (
+              <p className="col-span-full text-center text-zinc-400 text-sm py-6">{isKo ? "결과 없음" : "No results"}</p>
             ) : (
               searchResults.map((item) => {
-                const channelId = item.channelId;
-                const name = item.name;
-                const thumbUrl = item.thumbnailUrl;
-                const sel = selected.has(channelId);
+                const sel = selected.has(item.channelId);
+                const itemSkills = getYoutuberSkills(item.channelId);
                 return (
-                  <button key={channelId} onClick={() => toggle(channelId)}
-                    className={`flex items-center gap-2 p-2 rounded-xl border transition-all text-left ${
-                      sel ? "border-red-500 bg-red-50 dark:bg-red-950/40 ring-2 ring-red-300 shadow-sm"
+                  <button key={item.channelId} onClick={() => toggleChannel(item.channelId, item.name, item.thumbnailUrl)}
+                    className={`flex flex-col gap-1.5 p-3 rounded-xl border transition-all text-left ${
+                      sel ? "border-red-500 bg-red-50 dark:bg-red-950/40 ring-2 ring-red-300"
                           : "border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-sm"
                     }`}
                   >
-                    <img src={thumbUrl || undefined} alt="" width={32} height={32} className="shrink-0 rounded-full object-cover bg-zinc-800" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">{name}</p>
-                      <p className="text-[10px] truncate" style={{ color: getYoutuberSkill(channelId).color }}>
-                        {isKo ? getYoutuberSkill(channelId).nameKo : getYoutuberSkill(channelId).nameEn}
-                      </p>
+                    <div className="flex items-center gap-3">
+                      <img src={item.thumbnailUrl || undefined} alt="" width={40} height={40} className="shrink-0 rounded-full object-cover bg-zinc-800" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-zinc-900 dark:text-white truncate">{item.name}</p>
+                      </div>
+                      {sel ? <Check size={16} className="text-red-600 shrink-0" /> : <span className="text-zinc-400 text-xs">+</span>}
                     </div>
-                    {sel && <Check size={14} className="text-red-600 shrink-0" />}
+                    <div className="flex flex-wrap gap-1">
+                      {itemSkills.map(sk => (
+                        <span key={sk.id} className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: sk.color + "20", color: sk.color, border: `1px solid ${sk.color}40` }}>
+                          {sk.slot} {isKo ? sk.nameKo : sk.nameEn}
+                        </span>
+                      ))}
+                    </div>
                   </button>
                 );
               })
             )}
           </div>
-        </>
+        </div>
       )}
 
-      {lobbyQuery.trim().length === 0 && <div className="mb-6" />}
+      {lobbyQuery.trim().length === 0 && selected.size === 0 && (
+        <div className="text-center py-12 text-zinc-400">
+          <Youtube size={48} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">{isKo ? "유튜버를 검색해서 출전시키세요!" : "Search for YouTubers to add them!"}</p>
+          <p className="text-xs mt-1 text-zinc-500">{isKo ? "2~20명 선택 가능" : "Select 2-20 channels"}</p>
+        </div>
+      )}
+
+      {/* Selected channels */}
+      {selected.size > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-zinc-500">{isKo ? "출전 목록" : "Selected"}</p>
+            <span className="text-sm font-bold text-red-600">{t.selected(selected.size)}</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Array.from(selected.entries()).map(([id, ch]) => {
+              const eInfo = ch.element ? ELEMENT_INFO[ch.element] : null;
+              return (
+                <div key={id} className="flex items-center gap-1.5 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 rounded-full pl-1 pr-2 py-1">
+                  <img src={ch.thumbnailUrl || undefined} alt="" width={24} height={24} className="rounded-full object-cover bg-zinc-800" />
+                  <span className="text-xs font-bold text-zinc-900 dark:text-white max-w-[100px] truncate">{ch.name}</span>
+                  {eInfo && eInfo.type !== "neutral" && (
+                    <span className="text-xs px-1 rounded" style={{ backgroundColor: eInfo.color + "22", color: eInfo.color }}
+                      title={`${eInfo.icon} ${eInfo.nameKo} (${eInfo.nameEn})`}>
+                      {eInfo.icon}
+                    </span>
+                  )}
+                  <button onClick={() => removeChannel(id)} className="text-red-400 hover:text-red-600 ml-0.5 text-xs font-bold">&times;</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <button disabled={!canStart || phase === "loading"} onClick={startBattle}
         className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition sticky bottom-4 ${
@@ -1529,7 +2647,7 @@ export default function YoutuberBattleClient() {
       >
         {phase === "loading" ? (<><Loader2 size={18} className="animate-spin" />{t.loading}</>)
         : canStart ? (<><Swords size={18} />{t.start}</>)
-        : selected.size < 2 ? t.notEnough : t.need(2 - selected.size)}
+        : t.need(2 - selected.size)}
       </button>
     </div>
   );
