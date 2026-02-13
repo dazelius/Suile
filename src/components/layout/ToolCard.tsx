@@ -23,6 +23,7 @@ import {
   Globe,
   Gamepad2,
   Scissors,
+  Youtube,
   ChevronRight,
   LucideIcon,
 } from "lucide-react";
@@ -54,6 +55,7 @@ const iconMap: Record<string, LucideIcon> = {
   Globe,
   Gamepad2,
   Scissors,
+  Youtube,
 };
 
 interface ToolCardProps {

@@ -95,6 +95,10 @@ export interface Translations {
   toolCountryBattleName: string;
   toolCountryBattleDesc: string;
 
+  // ── 유튜버 배틀로얄 ──
+  toolYoutuberBattleName: string;
+  toolYoutuberBattleDesc: string;
+
   // ── 연봉 실수령액 계산기 ──
   toolSalaryCalcName: string;
   toolSalaryCalcDesc: string;
@@ -265,6 +269,8 @@ const ko: Translations = {
   toolStockRoyaleDesc: "주식 데이터를 RPG 스탯으로! 8개 종목의 배틀로얄",
   toolCountryBattleName: "나라 배틀로얄",
   toolCountryBattleDesc: "8개국 경제 데이터로 구슬 배틀! GDP, 인플레, 실업률이 스탯이 된다",
+  toolYoutuberBattleName: "유튜버 배틀로얄",
+  toolYoutuberBattleDesc: "구독자가 체력, 조회수가 화력! 유튜브 채널 데이터로 배틀로얄",
   toolShortFormName: "숏폼 편집기",
   toolShortFormDesc: "브라우저에서 바로 편집! 트리밍, 세로 크롭, 자막 추가까지",
 
@@ -443,6 +449,8 @@ const en: Translations = {
   toolStockRoyaleDesc: "Stock data as RPG stats! 8-stock battle royale",
   toolCountryBattleName: "Country Battle Royale",
   toolCountryBattleDesc: "8 nations clash with economic data! GDP, inflation, unemployment as stats",
+  toolYoutuberBattleName: "YouTuber Battle Royale",
+  toolYoutuberBattleDesc: "Subscribers = HP, Views = Power! YouTube channel data battle royale",
   toolShortFormName: "Short-form Editor",
   toolShortFormDesc: "Edit in your browser! Trim, vertical crop, and add captions",
 

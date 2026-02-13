@@ -171,6 +171,7 @@ async function main() {
   await generateToolOG("og-heart-rate.png", "심박수 측정", "카메라로 심박수를 측정해보세요", "❤️");
   await generateToolOG("og-face-score.png", "AI 관상", "AI가 얼굴을 분석해드립니다", "🎭");
   await generateToolOG("og-country-battle.png", "나라 배틀로얄", "8개국 경제 데이터로 구슬 배틀!", "🌍");
+  await generateToolOG("og-youtuber-battle.png", "유튜버 배틀로얄", "구독자 = HP, 조회수 = 화력! 최후의 1인은?", "▶");
 
   console.log("\n✅ All OG images generated!");
 }
