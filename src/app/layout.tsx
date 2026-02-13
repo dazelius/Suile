@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { siteConfig } from "@/config/site";
 import { LayoutShell } from "@/components/layout/LayoutShell";
@@ -39,10 +40,10 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/og-qr.png",
-        width: 800,
-        height: 800,
-        alt: siteConfig.name,
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: `${siteConfig.name} - 무료 온라인 도구 모음`,
       },
     ],
   },
@@ -50,7 +51,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: `${siteConfig.name} - 무료 온라인 도구 모음`,
     description: siteConfig.description,
-    images: ["/og-qr.png"],
+    images: ["/og.png"],
   },
   robots: {
     index: true,
@@ -87,6 +88,8 @@ export default function RootLayout({
         <meta name="theme-color" content="#ffffff" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <link rel="icon" type="image/png" href="/favicon.png" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="canonical" href={siteConfig.url} />
         {/* JSON-LD 구조화 데이터 */}
         <script
@@ -129,12 +132,6 @@ export default function RootLayout({
             }),
           }}
         />
-        {/* Google AdSense */}
-        <script
-          async
-          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1349078633848665"
-          crossOrigin="anonymous"
-        ></script>
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased overscroll-none`}
@@ -142,6 +139,12 @@ export default function RootLayout({
         <I18nProvider>
           <LayoutShell>{children}</LayoutShell>
         </I18nProvider>
+        {/* Google AdSense — afterInteractive avoids hydration mismatch */}
+        <Script
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1349078633848665"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );

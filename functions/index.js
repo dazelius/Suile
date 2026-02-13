@@ -72,3 +72,7 @@ exports.exportGoogleDoc = exportGoogleDoc.exportGoogleDoc;
 // ── 음성 파일 전사 ──
 const transcribeAudio = require("./transcribe-audio");
 exports.transcribeAudio = transcribeAudio.transcribeAudio;
+
+// ── 숏폼 타임스탬프 자막 전사 ──
+const transcribeTimestamps = require("./transcribe-timestamps");
+exports.transcribeWithTimestamps = transcribeTimestamps.transcribeWithTimestamps;
