@@ -18,13 +18,13 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [{ url: "/og-qr.png", width: 800, height: 800, alt: "몬테카를로 시뮬레이터" }],
+    images: [{ url: "/og-monte-carlo.png", width: 1200, height: 630, alt: "몬테카를로 시뮬레이터" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "몬테카를로 시뮬레이터",
     description: "2,000개의 시나리오로 투자 확률을 분석하세요.",
-    images: ["/og-qr.png"],
+    images: ["/og-monte-carlo.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/monte-carlo`,

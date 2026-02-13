@@ -183,3 +183,26 @@
     min-height: 100vh;
   }
 }
+
+/* ── 충돌 파티클 애니메이션 (유리 파편 — 빠르게 팡!) ── */
+@keyframes crash-flash {
+  0% { opacity: 0.9; transform: scale(0.5); }
+  30% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2.5); }
+}
+
+@keyframes crash-ring {
+  0% { transform: scale(0.3); opacity: 1; }
+  100% { transform: scale(12); opacity: 0; }
+}
+
+@keyframes crash-shard {
+  0% { transform: rotate(var(--s-deg)) translateY(0) scale(1); opacity: 1; }
+  100% { transform: rotate(var(--s-deg)) translateY(var(--s-dist)) scale(0.1); opacity: 0; }
+}
+
+@keyframes crash-spark {
+  0% { transform: rotate(var(--sp-deg)) translateY(0); opacity: 1; }
+  60% { opacity: 0.6; }
+  100% { transform: rotate(var(--sp-deg)) translateY(var(--sp-dist)); opacity: 0; }
+}

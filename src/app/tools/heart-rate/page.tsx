@@ -20,20 +20,13 @@ export const metadata: Metadata = {
   openGraph: {
     title: "심박수 측정기 - SUILE",
     description: "카메라에 손가락만 대면 심박수 측정! PPG 기술 기반 실시간 측정",
-    images: [
-      {
-        url: `${siteConfig.url}/heart-rate-og.png`,
-        width: 1200,
-        height: 630,
-        alt: "SUILE - 심박수 측정기",
-      },
-    ],
+    images: [{ url: "/og-heart-rate.png", width: 1200, height: 630, alt: "SUILE - 심박수 측정기" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "심박수 측정기 - SUILE",
     description: "카메라에 손가락만 대면 심박수 측정! PPG 기술 기반 실시간 측정",
-    images: [`${siteConfig.url}/heart-rate-og.png`],
+    images: ["/og-heart-rate.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/heart-rate`,

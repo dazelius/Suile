@@ -18,21 +18,14 @@ export const metadata: Metadata = {
     title: "블라인드 메시지 - SUILE",
     description:
       "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있어요. Send a blind message only the recipient can open.",
-    images: [
-      {
-        url: `${siteConfig.url}/og-qr.png`,
-        width: 800,
-        height: 800,
-        alt: "SUILE - 블라인드 메시지 (Blind Message)",
-      },
-    ],
+    images: [{ url: "/og-qr-letter.png", width: 1200, height: 630, alt: "SUILE - 블라인드 메시지" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "블라인드 메시지 - SUILE",
     description:
       "비밀 메시지를 보내보세요. 받는 사람만 열어볼 수 있어요.",
-    images: [`${siteConfig.url}/og-qr.png`],
+    images: ["/og-qr-letter.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/qr-letter`,

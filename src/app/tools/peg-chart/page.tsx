@@ -18,13 +18,13 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [{ url: "/og-qr.png", width: 800, height: 800, alt: "PEG 비율 차트" }],
+    images: [{ url: "/og-peg-chart.png", width: 1200, height: 630, alt: "PEG 비율 차트" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "PEG 비율 차트",
     description: "종목별 분기 PEG 추이를 시각화하여 비교합니다.",
-    images: ["/og-qr.png"],
+    images: ["/og-peg-chart.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/peg-chart`,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -13,6 +13,7 @@ import { Trophy, Zap, TrendingUp, TrendingDown, Flame } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { StockLogo } from "./StockLogo";
 import { getLogoUrls } from "./stock-logos";
+import { playBeep, playCrash, playReversal, playFanfare } from "./sfx";
 
 interface PricePoint { date: string; close: number; }
 interface StockResult { ticker: string; name: string; prices: PricePoint[]; }
@@ -148,6 +149,8 @@ function RaceIcon({
   initial,
   clipId,
   isLeader,
+  isSprinting,
+  value,
 }: {
   cx: number;
   cy: number;
@@ -156,31 +159,20 @@ function RaceIcon({
   initial: string;
   clipId: string;
   isLeader: boolean;
+  isSprinting: boolean;
+  value: number;
 }) {
-  const R = 17; // 고정 크기 — 리더 전환 시 크기 점프 방지
+  const R = 17;
+
   return (
     <g>
-      {/* Speed trail — 왼쪽으로 뻗는 잔상 (정적) */}
-      {[10, 22, 34].map((offset, i) => (
-        <circle
-          key={i}
-          cx={cx - offset}
-          cy={cy}
-          r={R * (0.5 - i * 0.12)}
-          fill={color}
-          opacity={0.15 - i * 0.04}
-        />
-      ))}
-
-      {/* 정적 외곽 글로우 — 애니메이션 없음 */}
+      {/* ── 외곽 글로우 ── */}
       <circle
-        cx={cx}
-        cy={cy}
-        r={R + 4}
+        cx={cx} cy={cy} r={R + 3}
         fill="none"
         stroke={color}
         strokeWidth={isLeader ? 1.8 : 1}
-        opacity={isLeader ? 0.22 : 0.08}
+        opacity={isLeader ? 0.3 : 0.12}
       />
 
       {/* Colored border ring */}
@@ -208,29 +200,25 @@ function RaceIcon({
         />
       ) : (
         <text
-          x={cx}
-          y={cy}
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontSize={R * 0.75}
-          fontWeight="bold"
-          fill={color}
+          x={cx} y={cy}
+          textAnchor="middle" dominantBaseline="central"
+          fontSize={R * 0.75} fontWeight="bold" fill={color}
         >
           {initial}
         </text>
       )}
 
-      {/* 리더 왕관 표시 */}
-      {isLeader && (
-        <text
-          x={cx}
-          y={cy - R - 6}
-          textAnchor="middle"
-          fontSize={12}
-        >
-          👑
-        </text>
-      )}
+      {/* ── 수익률 % 레이블 ── */}
+      <text
+        x={cx}
+        y={cy - R - 5}
+        textAnchor="middle"
+        fontSize={9}
+        fontWeight="bold"
+        fill={value >= 0 ? "#6ee7b7" : "#fca5a5"}
+      >
+        {value >= 0 ? "+" : ""}{value.toFixed(1)}%
+      </text>
     </g>
   );
 }
@@ -298,21 +286,28 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
   const momentumA = cur.retA - prev.retA;
   const momentumB = cur.retB - prev.retB;
 
-  // ── 연속 우세 카운트 ──
+  // ── 연속 우세 카운트 (최대 30개만 역추적) ──
   let streak = 0;
-  for (let i = Math.min(visibleCount - 1, total - 1); i >= 0; i--) {
-    const d = allData.current[i];
-    const aLeads = d.retA >= d.retB;
-    if (aLeads === leaderIsA) streak++;
-    else break;
+  {
+    const end = Math.min(visibleCount - 1, total - 1);
+    const start = Math.max(0, end - 30);
+    for (let i = end; i >= start; i--) {
+      if ((allData.current[i].retA >= allData.current[i].retB) === leaderIsA) streak++;
+      else break;
+    }
   }
 
-  // ── 최고 수익률 (현재까지의 High Water Mark) ──
-  let peakA = -Infinity, peakB = -Infinity;
-  for (let i = 0; i < visibleCount && i < total; i++) {
-    if (allData.current[i].retA > peakA) peakA = allData.current[i].retA;
-    if (allData.current[i].retB > peakB) peakB = allData.current[i].retB;
+  // ── 최고 수익률 (증분 계산) ──
+  const peakRef = useRef({ a: -Infinity, b: -Infinity, idx: 0 });
+  {
+    const pr = peakRef.current;
+    for (let i = pr.idx; i < visibleCount && i < total; i++) {
+      if (allData.current[i].retA > pr.a) pr.a = allData.current[i].retA;
+      if (allData.current[i].retB > pr.b) pr.b = allData.current[i].retB;
+    }
+    pr.idx = Math.min(visibleCount, total);
   }
+  const peakA = peakRef.current.a, peakB = peakRef.current.b;
   const isNewHighA = cur.retA === peakA && cur.retA > 0 && warmedUp;
   const isNewHighB = cur.retB === peakB && cur.retB > 0 && warmedUp;
   const drawdownA = peakA > 0 ? cur.retA - peakA : 0;
@@ -336,38 +331,28 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
   useEffect(() => {
     if (phase !== "intro") return;
     if (countdown <= 0) { setPhase("racing"); startRef.current = performance.now(); return; }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 900);
+    playBeep(countdown === 1);
+    const t = setTimeout(() => setCountdown((c) => c - 1), 750);
     return () => clearTimeout(t);
   }, [phase, countdown]);
 
-  // ── Racing animation ──
+  // ── Racing animation (한 단계, 일정 속도) ──
   useEffect(() => {
-    if (phase !== "racing" && phase !== "finish") return;
+    if (phase !== "racing") return;
 
-    const RACE_MS = phase === "racing" ? 18000 : 6000;
+    const RACE_MS = 25000;
 
     const animate = (now: number) => {
       const elapsed = now - startRef.current;
-      let p = Math.min(elapsed / RACE_MS, 1);
-
-      if (phase === "racing") {
-        p = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-        const target = Math.max(1, Math.floor(p * total * 0.8));
-        setVisibleCount(target);
-        if (elapsed >= RACE_MS) {
-          setPhase("finish");
-          startRef.current = performance.now();
-          return;
-        }
-      } else {
-        p = 1 - Math.pow(1 - p, 4);
-        const base = Math.floor(total * 0.8);
-        setVisibleCount(Math.min(total, base + Math.floor(p * (total - base))));
-        if (elapsed >= RACE_MS) {
-          setVisibleCount(total);
-          setPhase("winner");
-          return;
-        }
+      const p = Math.min(elapsed / RACE_MS, 1);
+      // ease-in-out: 초반 살짝 가속 → 일정 → 끝까지
+      const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      const target = Math.max(1, Math.floor(eased * total));
+      setVisibleCount(target);
+      if (elapsed >= RACE_MS) {
+        setVisibleCount(total);
+        setPhase("winner");
+        return;
       }
       animRef.current = requestAnimationFrame(animate);
     };
@@ -375,31 +360,114 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   }, [phase, total]);
 
-  // ── Lead change detection (역전 감지) ──
-  // 초반 20% 구간의 역전은 무시 (양쪽 다 0% 근처라 의미 없음)
+  // ── Lead change detection (역전 감지 + 충돌 파티클) ──
+  const iconPosRef = useRef({ ax: 0, ay: 0, bx: 0, by: 0 });
+  const [crashes, setCrashes] = useState<{ id: number; x: number; y: number }[]>([]);
+  const allCrashCount = useRef(0); // 누적 교차 횟수 (초반 포함)
+
   useEffect(() => {
+    // 모든 교차에서 충돌 파티클 (초반 제한 없음)
+    const allSeen = leadChanges.current.filter((lc) => lc.index <= visibleCount - 1);
+    if (allSeen.length > allCrashCount.current) {
+      const pos = iconPosRef.current;
+      const midX = (pos.ax + pos.bx) / 2;
+      const midY = (pos.ay + pos.by) / 2;
+      // 새로운 교차 수만큼 파티클 추가
+      const newCrashes: { id: number; x: number; y: number }[] = [];
+      for (let i = allCrashCount.current; i < allSeen.length; i++) {
+        newCrashes.push({ id: Date.now() + i, x: midX, y: midY });
+      }
+      allCrashCount.current = allSeen.length;
+      playCrash();
+      setCrashes(prev => [...prev, ...newCrashes]);
+      // 0.5초 후 해당 파티클들 제거
+      const ids = newCrashes.map(c => c.id);
+      setTimeout(() => {
+        setCrashes(prev => prev.filter(c => !ids.includes(c.id)));
+      }, 500);
+    }
+
+    // 역전 뱃지/리더 플래시는 초반 20% 이후만
     const minIdx = Math.floor(total * 0.2);
-    const seen = leadChanges.current.filter((lc) => lc.index <= visibleCount - 1 && lc.index >= minIdx);
+    const seen = allSeen.filter((lc) => lc.index >= minIdx);
     if (seen.length > lcSeen) {
       const latest = seen[seen.length - 1];
       setLeadFlash(latest.newLeader);
       setReversalOverlay({ leader: latest.newLeader, count: seen.length });
       setLcSeen(seen.length);
-      setTimeout(() => setLeadFlash(null), 1500);
-      setTimeout(() => setReversalOverlay(null), 2000);
+      playReversal();
+      setTimeout(() => setLeadFlash(null), 1000);
+      setTimeout(() => setReversalOverlay(null), 1200);
     }
-  }, [visibleCount, lcSeen]);
+  }, [visibleCount, lcSeen, total]);
 
   // ── Winner → onComplete ──
   useEffect(() => {
     if (phase !== "winner") return;
-    const t = setTimeout(onComplete, 4000);
+    playFanfare();
+    const t = setTimeout(onComplete, 3500);
     return () => clearTimeout(t);
   }, [phase, onComplete]);
 
-  const chartData = allData.current.slice(0, visibleCount);
+  // ── 슬라이딩 윈도우 + 룩어헤드 ──
+  const WINDOW = Math.min(120, Math.max(80, Math.floor(total * 0.45)));
+  const targetStart = Math.max(0, visibleCount - WINDOW);
+
+  // 부드러운 스크롤
+  const windowStartRef = useRef(0);
+  windowStartRef.current += (targetStart - windowStartRef.current) * 0.18;
+  const windowStart = Math.max(0, Math.round(windowStartRef.current));
+
+  const realData = allData.current.slice(windowStart, visibleCount);
+  const lastRealIdx = realData.length - 1;
+
+  // 룩어헤드
+  const baseLookAhead = Math.floor(WINDOW * 0.22);
+  const lookAhead = Math.min(baseLookAhead, total - visibleCount);
+
+  const chartData = useMemo(() => {
+    if (lookAhead === 0) return realData;
+    const pad: ChartRow[] = [];
+    for (let i = 0; i < lookAhead; i++) {
+      const fi = Math.min(visibleCount + i, total - 1);
+      pad.push({
+        idx: visibleCount + i,
+        date: allData.current[fi].date,
+        retA: null as unknown as number,
+        retB: null as unknown as number,
+        valA: 0,
+        valB: 0,
+      });
+    }
+    return [...realData, ...pad];
+  }, [windowStart, visibleCount, lookAhead]); // eslint-disable-line react-hooks/exhaustive-deps
   const pct = Math.round((visibleCount / total) * 100);
-  const lastIdx = chartData.length - 1;
+  const lastIdx = lastRealIdx;
+
+  // ── 안정적 Y축 도메인 (텔레포트 방지) ──
+  const yDomainRef = useRef<[number, number]>([-5, 5]);
+  const MIN_Y_RANGE = 4;
+  {
+    let cMin = 0, cMax = 0;
+    for (const d of realData) {
+      if (d.retA < cMin) cMin = d.retA;
+      if (d.retB < cMin) cMin = d.retB;
+      if (d.retA > cMax) cMax = d.retA;
+      if (d.retB > cMax) cMax = d.retB;
+    }
+    const pad = Math.max(MIN_Y_RANGE, (cMax - cMin) * 0.15);
+    const tMin = cMin - pad;
+    const tMax = cMax + pad;
+    yDomainRef.current = [
+      yDomainRef.current[0] + (tMin - yDomainRef.current[0]) * 0.14,
+      yDomainRef.current[1] + (tMax - yDomainRef.current[1]) * 0.14,
+    ];
+    const range = yDomainRef.current[1] - yDomainRef.current[0];
+    if (range < MIN_Y_RANGE * 2) {
+      const mid = (yDomainRef.current[0] + yDomainRef.current[1]) / 2;
+      yDomainRef.current = [mid - MIN_Y_RANGE, mid + MIN_Y_RANGE];
+    }
+  }
 
   // ── 풀스크린 경기장 래퍼 ──
   return (
@@ -416,42 +484,20 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
         />
       )}
 
-      {/* ── 역전! 오버레이 ── */}
+      {/* ── 역전 미니 뱃지 (차트 줌인이 메인 효과) ── */}
       {reversalOverlay && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
-          {/* 배경 플래시 */}
-          <div
-            className="absolute inset-0 animate-in fade-in duration-200"
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-in fade-in zoom-in-90 duration-200">
+          <span
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-sm"
             style={{
-              background: reversalOverlay.leader === "A"
-                ? "radial-gradient(circle, rgba(16,185,129,0.2) 0%, transparent 70%)"
-                : "radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%)",
+              backgroundColor: reversalOverlay.leader === "A" ? "rgba(16,185,129,0.2)" : "rgba(99,102,241,0.2)",
+              color: reversalOverlay.leader === "A" ? "#6ee7b7" : "#a5b4fc",
+              border: `1px solid ${reversalOverlay.leader === "A" ? "rgba(16,185,129,0.3)" : "rgba(99,102,241,0.3)"}`,
             }}
-          />
-          {/* 텍스트 */}
-          <div className="relative animate-in zoom-in-50 duration-300">
-            <div
-              className="text-5xl font-black tracking-tight"
-              style={{
-                color: reversalOverlay.leader === "A" ? "#10b981" : "#6366f1",
-                textShadow: `0 0 40px ${reversalOverlay.leader === "A" ? "rgba(16,185,129,0.6)" : "rgba(99,102,241,0.6)"}, 0 0 80px ${reversalOverlay.leader === "A" ? "rgba(16,185,129,0.3)" : "rgba(99,102,241,0.3)"}`,
-              }}
-            >
-              {locale === "ko" ? "역전!" : "REVERSAL!"}
-            </div>
-            <div className="text-center mt-1">
-              <span
-                className="text-xs font-bold px-2 py-0.5 rounded-full"
-                style={{
-                  backgroundColor: reversalOverlay.leader === "A" ? "rgba(16,185,129,0.2)" : "rgba(99,102,241,0.2)",
-                  color: reversalOverlay.leader === "A" ? "#6ee7b7" : "#a5b4fc",
-                }}
-              >
-                {reversalOverlay.leader === "A" ? dataA.name : dataB.name} {locale === "ko" ? "역전 성공" : "takes the lead"}
-                {reversalOverlay.count > 1 && ` (${reversalOverlay.count}${locale === "ko" ? "번째" : "x"})`}
-              </span>
-            </div>
-          </div>
+          >
+            {locale === "ko" ? "역전" : "Lead Change"}
+            {reversalOverlay.count > 1 && ` ${reversalOverlay.count}x`}
+          </span>
         </div>
       )}
 
@@ -491,9 +537,6 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
             } ${leadFlash === "A" ? "ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/30" : ""}`}>
               <div className="relative shrink-0">
                 <StockLogo ticker={dataA.ticker} name={dataA.name} size={32} />
-                {leaderIsA && phase !== "winner" && (
-                  <div className="absolute -top-1 -right-1 text-[9px]">👑</div>
-                )}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-zinc-400 truncate flex items-center gap-1">
@@ -515,7 +558,7 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
             <div className="flex flex-col items-center justify-center w-10 shrink-0">
               {phase === "winner" ? (
                 <Trophy className="h-4 w-4 text-yellow-500" />
-              ) : phase === "finish" ? (
+              ) : isVeryClose ? (
                 <Zap className="h-4 w-4 text-orange-400 animate-pulse" />
               ) : isVeryClose ? (
                 <Flame className="h-4 w-4 text-red-500 animate-pulse" />
@@ -534,9 +577,6 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
             } ${leadFlash === "B" ? "ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/30" : ""}`}>
               <div className="relative shrink-0">
                 <StockLogo ticker={dataB.ticker} name={dataB.name} size={32} />
-                {!leaderIsA && phase !== "winner" && (
-                  <div className="absolute -top-1 -right-1 text-[9px]">👑</div>
-                )}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-zinc-400 truncate flex items-center gap-1">
@@ -571,7 +611,7 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
           )}
 
           {/* 차트 영역 */}
-          <div className="flex-1 px-2 py-1 min-h-0 relative">
+          <div className="flex-1 px-2 py-1 min-h-0 relative overflow-hidden">
             {/* 접전 시 차트 배경 긴장감 */}
             {phase !== "winner" && isClose && (
               <div
@@ -581,6 +621,37 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
                   background: "radial-gradient(ellipse at center, rgba(239,68,68,0.08) 0%, transparent 70%)",
                 }}
               />
+            )}
+
+            {/* 왼쪽 모션 블러 */}
+            {phase !== "winner" && visibleCount > WINDOW && (
+              <div
+                className="absolute inset-y-0 left-0 w-20 pointer-events-none z-10 rounded-l-lg"
+                style={{ background: "linear-gradient(to right, #0a0a0b 10%, transparent)" }}
+              />
+            )}
+
+            {/* 골인 라인 (오른쪽 끝 — 체커 플래그 스트라이프) */}
+            {phase === "racing" && progressRatio > 0.5 && (
+              <div
+                className="absolute inset-y-0 right-0 pointer-events-none z-10 flex flex-col justify-between"
+                style={{
+                  width: 6,
+                  opacity: Math.min(1, (progressRatio - 0.5) * 3),
+                }}
+              >
+                {Array.from({ length: 20 }, (_, i) => (
+                  <div
+                    key={i}
+                    className="flex-1"
+                    style={{
+                      background: i % 2 === 0
+                        ? "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.7) 50%, transparent 100%)"
+                        : "linear-gradient(90deg, transparent 0%, rgba(250,204,21,0.5) 50%, transparent 100%)",
+                    }}
+                  />
+                ))}
+              </div>
             )}
 
             {phase === "winner" ? (
@@ -633,26 +704,30 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
                 <AreaChart data={chartData} margin={{ top: 8, right: 30, left: 4, bottom: 4 }}>
                   <defs>
                     <linearGradient id="gA" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity={leaderIsA ? 0.4 : 0.15} />
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={leaderIsA ? 0.35 : 0.12} />
                       <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="gB" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={!leaderIsA ? 0.4 : 0.15} />
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity={!leaderIsA ? 0.35 : 0.12} />
                       <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="date" hide />
-                  <YAxis hide domain={["auto", "auto"]} />
-                  <ReferenceLine y={0} stroke="#27272a" strokeWidth={1} />
+                  <YAxis hide domain={yDomainRef.current} />
+                  <ReferenceLine y={0} stroke="#27272a" strokeWidth={1} strokeDasharray="4 4" />
                   <Area
-                    type="monotone"
+                    type="monotoneX"
                     dataKey="retA"
                     stroke="#10b981"
-                    strokeWidth={leaderIsA ? 2.5 : 1.5}
+                    strokeWidth={leaderIsA ? 2.2 : 1.4}
+                    strokeLinecap="round"
                     fill="url(#gA)"
+                    connectNulls={false}
                     dot={(props: Record<string, unknown>) => {
                       const { cx, cy, index } = props as { cx: number; cy: number; index: number };
                       if (index !== lastIdx || !cx || !cy) return <g key={`dA${index}`} />;
+                      iconPosRef.current.ax = cx;
+                      iconPosRef.current.ay = cy;
                       return (
                         <RaceIcon
                           key="endA"
@@ -663,20 +738,26 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
                           initial={dataA.name.charAt(0)}
                           clipId="raceClipA"
                           isLeader={leaderIsA}
+                          isSprinting={false}
+                          value={cur.retA}
                         />
                       );
                     }}
                     isAnimationActive={false}
                   />
                   <Area
-                    type="monotone"
+                    type="monotoneX"
                     dataKey="retB"
                     stroke="#6366f1"
-                    strokeWidth={!leaderIsA ? 2.5 : 1.5}
+                    strokeWidth={!leaderIsA ? 2.2 : 1.4}
+                    strokeLinecap="round"
                     fill="url(#gB)"
+                    connectNulls={false}
                     dot={(props: Record<string, unknown>) => {
                       const { cx, cy, index } = props as { cx: number; cy: number; index: number };
                       if (index !== lastIdx || !cx || !cy) return <g key={`dB${index}`} />;
+                      iconPosRef.current.bx = cx;
+                      iconPosRef.current.by = cy;
                       return (
                         <RaceIcon
                           key="endB"
@@ -687,6 +768,8 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
                           initial={dataB.name.charAt(0)}
                           clipId="raceClipB"
                           isLeader={!leaderIsA}
+                          isSprinting={false}
+                          value={cur.retB}
                         />
                       );
                     }}
@@ -695,6 +778,61 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
                 </AreaChart>
               </ResponsiveContainer>
             )}
+
+            {/* ── 충돌 파티클 (교차 지점마다, 동시 다수 가능) ── */}
+            {crashes.map((c) => (
+              <div
+                key={c.id}
+                className="absolute pointer-events-none z-20"
+                style={{ left: c.x, top: c.y, transform: "translate(-50%, -50%)" }}
+              >
+                {/* 플래시 */}
+                <div style={{
+                  position: "absolute", left: -60, top: -60, width: 120, height: 120,
+                  borderRadius: "50%",
+                  background: "radial-gradient(circle, rgba(147,197,253,0.6) 0%, transparent 60%)",
+                  animation: "crash-flash 0.25s ease-out forwards",
+                }} />
+                {/* 링 */}
+                <div style={{
+                  position: "absolute", left: -4, top: -4, width: 8, height: 8,
+                  borderRadius: "50%",
+                  border: "2px solid #93c5fd",
+                  animation: "crash-ring 0.3s ease-out forwards",
+                }} />
+                {/* 유리 파편 (10개 — 빠르게 팡!) */}
+                {Array.from({ length: 10 }, (_, i) => {
+                  const deg = i * 36 + (i % 2) * 18;
+                  const w = 1.5 + (i % 3) * 1.5;
+                  const h = 3 + (i % 4) * 2;
+                  return (
+                    <div key={`s${i}`} style={{
+                      position: "absolute", left: -w / 2, top: -h / 2, width: w, height: h,
+                      background: i % 3 === 0 ? "#dbeafe" : i % 3 === 1 ? "#93c5fd" : "#60a5fa",
+                      borderRadius: "1px",
+                      animation: "crash-shard 0.3s cubic-bezier(0,0.7,0.3,1) forwards",
+                      ["--s-deg" as string]: `${deg}deg`,
+                      ["--s-dist" as string]: `${-35 - (i % 3) * 15}px`,
+                    }} />
+                  );
+                })}
+                {/* 작은 스파크 점 (8개) */}
+                {Array.from({ length: 8 }, (_, i) => {
+                  const deg = i * 45 + 22;
+                  return (
+                    <div key={`sp${i}`} style={{
+                      position: "absolute", left: -1.5, top: -1.5, width: 3, height: 3,
+                      borderRadius: "50%",
+                      background: i % 2 === 0 ? "#e0f2fe" : "#bae6fd",
+                      animation: "crash-spark 0.35s ease-out forwards",
+                      animationDelay: `${i * 0.01}s`,
+                      ["--sp-deg" as string]: `${deg}deg`,
+                      ["--sp-dist" as string]: `${-50 - (i % 3) * 10}px`,
+                    }} />
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
           {/* 하단: 해설 + 타임라인 */}
@@ -702,12 +840,7 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
             <div className="px-4 pb-[max(env(safe-area-inset-bottom),12px)] space-y-1">
               {/* 실시간 해설 티커 */}
               <div className="text-center min-h-[18px] flex items-center justify-center gap-2">
-                {phase === "finish" ? (
-                  <span className="inline-flex items-center gap-1 px-3 py-0.5 rounded-full bg-orange-500/20 text-orange-400 text-[11px] font-bold animate-pulse uppercase tracking-wider">
-                    <Zap className="h-3 w-3" />
-                    {locale === "ko" ? "막판 스퍼트" : "Final Sprint"}
-                  </span>
-                ) : isVeryClose ? (
+                {isVeryClose ? (
                   <span className="inline-flex items-center gap-1 px-3 py-0.5 rounded-full bg-red-500/20 text-red-400 text-[11px] font-bold animate-pulse">
                     <Flame className="h-3 w-3" />
                     {commentary}
@@ -728,9 +861,7 @@ export function BattleAnimation({ dataA, dataB, investAmount, onComplete }: Batt
               <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all duration-75 ${
-                    phase === "finish"
-                      ? "bg-gradient-to-r from-orange-500 to-red-500"
-                      : isClose
+                    isClose
                         ? "bg-gradient-to-r from-zinc-500 to-orange-500"
                         : "bg-zinc-500"
                   }`}

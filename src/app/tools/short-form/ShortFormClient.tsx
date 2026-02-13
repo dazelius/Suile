@@ -9,6 +9,39 @@ import {
 } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import type { CaptionEntry } from "./lib/types";
+import { uploadToYouTube, type PrivacyStatus } from "./lib/youtube-upload";
+
+/* ═══════════════════════════════════════════════
+   Google Identity Services Types
+   ═══════════════════════════════════════════════ */
+
+interface GisTokenResponse {
+  access_token?: string;
+  error?: string;
+}
+
+interface GisTokenClient {
+  requestAccessToken: (opts?: { prompt?: string }) => void;
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        oauth2: {
+          initTokenClient: (config: {
+            client_id: string;
+            scope: string;
+            callback: (response: GisTokenResponse) => void;
+          }) => GisTokenClient;
+        };
+      };
+    };
+  }
+}
+
+const GOOGLE_CLIENT_ID = "860732393806-ppvqgivj0s0tjesj9ed1aianc6rjh3sh.apps.googleusercontent.com";
+const YT_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
 
 /* ═══════════════════════════════════════════════
    Constants
@@ -85,6 +118,27 @@ const L = {
     letterboxNone: "없음",
     letterboxThin: "얇게",
     letterboxThick: "두껍게",
+    // ─── YouTube ───
+    uploadYoutube: "YouTube Shorts 업로드",
+    uploadYoutubeDesc: "파일 다운로드 후 YouTube Studio가 열립니다",
+    encodingFast: "고속 영상 생성 중...",
+    remuxing: "MP4 변환 중...",
+    // ─── YouTube Direct Upload ───
+    ytUpload: "YouTube Shorts 직접 업로드",
+    ytUploading: "YouTube에 업로드 중...",
+    ytDone: "업로드 완료!",
+    ytWatch: "YouTube에서 보기",
+    ytError: "업로드 실패",
+    ytTitle: "제목",
+    ytTitlePlaceholder: "Shorts 제목을 입력하세요",
+    ytPrivacy: "공개 설정",
+    ytPublic: "공개",
+    ytUnlisted: "일부공개",
+    ytPrivate: "비공개",
+    ytGoogleError: "Google 로그인을 사용할 수 없습니다",
+    // ─── Trim ───
+    trimRange: (sel: string, total: string) => `선택: ${sel}초 / 전체: ${total}초`,
+    trimDrag: "핸들을 드래그하여 구간 선택",
   },
   en: {
     title: "Short-form Editor",
@@ -141,6 +195,27 @@ const L = {
     letterboxNone: "None",
     letterboxThin: "Thin",
     letterboxThick: "Thick",
+    // ─── YouTube ───
+    uploadYoutube: "Upload to YouTube Shorts",
+    uploadYoutubeDesc: "File will download, then YouTube Studio opens",
+    encodingFast: "Fast video creation...",
+    remuxing: "Converting to MP4...",
+    // ─── YouTube Direct Upload ───
+    ytUpload: "Upload to YouTube Shorts",
+    ytUploading: "Uploading to YouTube...",
+    ytDone: "Upload complete!",
+    ytWatch: "Watch on YouTube",
+    ytError: "Upload failed",
+    ytTitle: "Title",
+    ytTitlePlaceholder: "Enter Shorts title",
+    ytPrivacy: "Privacy",
+    ytPublic: "Public",
+    ytUnlisted: "Unlisted",
+    ytPrivate: "Private",
+    ytGoogleError: "Google sign-in not available",
+    // ─── Trim ───
+    trimRange: (sel: string, total: string) => `Selected: ${sel}s / Total: ${total}s`,
+    trimDrag: "Drag handles to select range",
   },
 } as const;
 
@@ -227,6 +302,22 @@ export default function ShortFormClient() {
   const [particlesOn, setParticlesOn] = useState(true);
   const [letterbox, setLetterbox] = useState<"none" | "thin" | "thick">("thin");
 
+  // ─── YouTube Upload ───
+  const [ytPhase, setYtPhase] = useState<"idle" | "auth" | "uploading" | "done" | "error">("idle");
+  const [ytProgress, setYtProgress] = useState(0);
+  const [ytVideoId, setYtVideoId] = useState("");
+  const [ytError, setYtError] = useState("");
+  const [ytTitle, setYtTitle] = useState("");
+  const [ytPrivacy, setYtPrivacy] = useState<PrivacyStatus>("private");
+  const gisTokenClientRef = useRef<GisTokenClient | null>(null);
+  const ytPendingRef = useRef(false);
+
+  // ─── Trim Range ───
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const trimDuration = trimEnd - trimStart;
+  const needsRangeSelect = duration > MAX_DUR;
+
   /* ── Refs ── */
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -240,7 +331,6 @@ export default function ShortFormClient() {
   const particlesRef = useRef<{ x: number; y: number; size: number; speed: number; opacity: number; drift: number }[]>([]);
   const particleInitRef = useRef(false);
 
-  const trimEnd = Math.min(duration, MAX_DUR);
   const outW = resolution === "1080" ? 1080 : 720;
   const outH = resolution === "1080" ? 1920 : 1280;
   const canvasW = 320;
@@ -280,12 +370,17 @@ export default function ShortFormClient() {
     if (f?.type.startsWith("video/")) handleFile(f);
   }, [handleFile]);
 
-  /* ── Video loaded → auto calculate 9:16 crop ── */
+  /* ── Video loaded → auto calculate 9:16 crop + trim range ── */
   const onMeta = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    setDuration(v.duration);
+    const dur = v.duration;
+    setDuration(dur);
     setCurrentTime(0);
+
+    // Trim: 60초 이하면 전체, 초과면 처음 60초
+    setTrimStart(0);
+    setTrimEnd(Math.min(dur, MAX_DUR));
 
     const vr = v.videoWidth / v.videoHeight;
     const tr = 9 / 16;
@@ -319,7 +414,8 @@ export default function ShortFormClient() {
       const fCtx = frameCanvas.getContext("2d")!;
 
       const frameInterval = 8;
-      const maxFrames = Math.min(Math.ceil(trimEnd / frameInterval), 8);
+      const effectiveDur = trimEnd - trimStart;
+      const maxFrames = Math.min(Math.ceil(effectiveDur / frameInterval), 8);
       const framesPayload: { time: number; data: string }[] = [];
 
       // Pause video for seeking
@@ -341,7 +437,7 @@ export default function ShortFormClient() {
       }
 
       for (let i = 0; i < maxFrames; i++) {
-        const t_sec = i * frameInterval;
+        const t_sec = trimStart + i * frameInterval;
         if (t_sec >= trimEnd) break;
 
         // Seek and wait (with timeout for mobile browsers)
@@ -411,7 +507,7 @@ export default function ShortFormClient() {
       setCaptionMsg(t.captionFail);
       setCaptions([]);
     }
-  }, [videoFile, captionEnabled, trimEnd, t]);
+  }, [videoFile, captionEnabled, trimStart, trimEnd, t]);
 
   // Auto-generate captions when video is loaded and captions are enabled
   useEffect(() => {
@@ -529,38 +625,43 @@ export default function ShortFormClient() {
     }
 
     // ─── Particles (floating upward sparkles) ───
+    // Particles use normalized coords (0-1) so they scale to any canvas size
     if (particlesOn) {
       const P = particlesRef.current;
-      // Init particles once
+      // Init particles once (normalized 0-1 coords)
       if (!particleInitRef.current || P.length === 0) {
         P.length = 0;
         for (let i = 0; i < 25; i++) {
           P.push({
-            x: Math.random() * cW,
-            y: Math.random() * cH,
-            size: 1 + Math.random() * 2.5,
-            speed: 0.3 + Math.random() * 0.8,
+            x: Math.random(),         // 0-1 normalized
+            y: Math.random(),         // 0-1 normalized
+            size: 0.003 + Math.random() * 0.005, // relative to cW
+            speed: 0.0005 + Math.random() * 0.0012, // relative to cH per frame
             opacity: 0.15 + Math.random() * 0.4,
-            drift: (Math.random() - 0.5) * 0.4,
+            drift: (Math.random() - 0.5) * 0.001,
           });
         }
         particleInitRef.current = true;
       }
       for (const p of P) {
         p.y -= p.speed;
-        p.x += p.drift + Math.sin(p.y * 0.02) * 0.3;
-        // Wrap around
-        if (p.y < -5) { p.y = cH + 5; p.x = Math.random() * cW; }
-        if (p.x < -5) p.x = cW + 5;
-        if (p.x > cW + 5) p.x = -5;
+        p.x += p.drift + Math.sin(p.y * 12) * 0.0005;
+        // Wrap around (normalized)
+        if (p.y < -0.01) { p.y = 1.01; p.x = Math.random(); }
+        if (p.x < -0.01) p.x = 1.01;
+        if (p.x > 1.01) p.x = -0.01;
+        // Convert to pixel coords
+        const px = p.x * cW;
+        const py = p.y * cH;
+        const ps = p.size * cW;
         // Draw glowing dot
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.arc(px, py, ps, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255,255,255,${p.opacity.toFixed(2)})`;
         ctx.fill();
         // Soft glow
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
+        ctx.arc(px, py, ps * 2.5, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255,255,255,${(p.opacity * 0.15).toFixed(3)})`;
         ctx.fill();
       }
@@ -588,11 +689,12 @@ export default function ShortFormClient() {
 
     // ─── Intro / Outro — dynamic black bars + title ───
     const ct = v.currentTime;
+    const relCt = ct - trimStart; // relative time from trim start
     const INTRO = 1.0;  // 1 second intro
     const OUTRO = 0.8;  // 0.8 second outro
 
-    if (ct < INTRO) {
-      const p = ct / INTRO; // 0→1 progress
+    if (relCt >= 0 && relCt < INTRO) {
+      const p = relCt / INTRO; // 0→1 progress
       ctx.fillStyle = "#000";
 
       // ── Phase 1 (0–0.35): Bars slam in from top/bottom/sides ──
@@ -733,7 +835,7 @@ export default function ShortFormClient() {
         ctx.fillRect(0, 0, cW, cH);
       }
     }
-  }, [cropX, cropY, cropW, cropH, bgMode, captions, watermark, trimEnd, introTitle, outroText, vignetteOn, particlesOn, letterbox]);
+  }, [cropX, cropY, cropW, cropH, bgMode, captions, watermark, trimStart, trimEnd, introTitle, outroText, vignetteOn, particlesOn, letterbox]);
 
   useEffect(() => {
     if (phase !== "preview" && phase !== "done") return;
@@ -744,13 +846,13 @@ export default function ShortFormClient() {
       const v = videoRef.current;
       if (v) {
         setCurrentTime(v.currentTime);
-        if (v.currentTime >= trimEnd) { v.currentTime = 0; }
+        if (v.currentTime >= trimEnd) { v.currentTime = trimStart; }
       }
       animRef.current = requestAnimationFrame(loop);
     };
     animRef.current = requestAnimationFrame(loop);
     return () => { running = false; cancelAnimationFrame(animRef.current); };
-  }, [phase, drawFrame, trimEnd]);
+  }, [phase, drawFrame, trimStart, trimEnd]);
 
   /* ── Playback ── */
   const playPromiseRef = useRef<Promise<void> | null>(null);
@@ -786,9 +888,9 @@ export default function ShortFormClient() {
     if (!el || !v) return;
     const rect = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    v.currentTime = ratio * trimEnd;
+    v.currentTime = trimStart + ratio * (trimEnd - trimStart);
     setCurrentTime(v.currentTime);
-  }, [trimEnd]);
+  }, [trimStart, trimEnd]);
 
   const onTimelineDown = useCallback(async (e: React.PointerEvent) => {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -811,6 +913,61 @@ export default function ShortFormClient() {
   const onTimelineUp = useCallback(() => {
     setIsSeeking(false);
   }, []);
+
+  /* ── Range trim handles (for videos > 60s) ── */
+  const rangeRef = useRef<HTMLDivElement>(null);
+  const [rangeDragging, setRangeDragging] = useState<"start" | "end" | null>(null);
+
+  const onRangePointerDown = useCallback((handle: "start" | "end", e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setRangeDragging(handle);
+  }, []);
+
+  const onRangePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!rangeDragging || !rangeRef.current) return;
+    const rect = rangeRef.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const time = ratio * duration;
+
+    const MIN_RANGE = 5;
+
+    if (rangeDragging === "start") {
+      const newStart = Math.max(0, Math.min(time, trimEnd - MIN_RANGE));
+      // Enforce max 60s range
+      if (trimEnd - newStart > MAX_DUR) {
+        setTrimStart(trimEnd - MAX_DUR);
+      } else {
+        setTrimStart(newStart);
+      }
+    } else {
+      const newEnd = Math.min(duration, Math.max(time, trimStart + MIN_RANGE));
+      // Enforce max 60s range
+      if (newEnd - trimStart > MAX_DUR) {
+        setTrimEnd(trimStart + MAX_DUR);
+      } else {
+        setTrimEnd(newEnd);
+      }
+    }
+  }, [rangeDragging, duration, trimStart, trimEnd]);
+
+  const onRangePointerUp = useCallback(() => {
+    setRangeDragging(null);
+  }, []);
+
+  /* ── Range timeline seek (click inside selected range) ── */
+  const seekInRange = useCallback((clientX: number) => {
+    const el = rangeRef.current;
+    const v = videoRef.current;
+    if (!el || !v) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const time = ratio * duration;
+    // Clamp to trim range
+    const clamped = Math.max(trimStart, Math.min(trimEnd, time));
+    v.currentTime = clamped;
+    setCurrentTime(clamped);
+  }, [duration, trimStart, trimEnd]);
 
   /* ── Drag-to-crop state ── */
   const [isDragging, setIsDragging] = useState(false);
@@ -869,12 +1026,223 @@ export default function ShortFormClient() {
   }, [togglePlay]);
 
   /* ════════════════════════════════════════════
-     EXPORT
+     EXPORT — FAST (MediaRecorder)
      ════════════════════════════════════════════ */
-  const handleExport = useCallback(async () => {
+  const handleExportFast = useCallback(async (): Promise<boolean> => {
+    const v = videoRef.current;
+    const origCanvas = canvasRef.current;
+    if (!v || !origCanvas) return false;
+
+    // Feature check
+    if (typeof MediaRecorder === "undefined") return false;
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = outW;
+    exportCanvas.height = outH;
+    if (typeof exportCanvas.captureStream !== "function") return false;
+
+    console.log("[FastExport] Starting MediaRecorder path...");
+    setPhase("encoding");
+
+    // Swap canvas for full-res
+    canvasRef.current = exportCanvas;
+
+    const exportDuration = trimEnd - trimStart;
+    const fps = 24;
+
+    try {
+      // 1. Set up video stream from canvas
+      const canvasStream = exportCanvas.captureStream(fps);
+
+      // 2. Set up audio: original + optional BGM via AudioContext
+      const audioCtx = new AudioContext();
+      const dest = audioCtx.createMediaStreamDestination();
+
+      // Original audio from video element
+      let mediaSource: MediaElementAudioSourceNode | null = null;
+      try {
+        mediaSource = audioCtx.createMediaElementSource(v);
+        mediaSource.connect(dest);
+        // Also keep it connected to speakers for monitoring? No — muted export.
+      } catch {
+        // No audio or already captured — fine
+      }
+
+      // BGM
+      let bgmSource: AudioBufferSourceNode | null = null;
+      if (bgmData) {
+        try {
+          const bgmBuf = await audioCtx.decodeAudioData(new Uint8Array(bgmData).buffer);
+          bgmSource = audioCtx.createBufferSource();
+          bgmSource.buffer = bgmBuf;
+          bgmSource.loop = true;
+          const bgmGain = audioCtx.createGain();
+          bgmGain.gain.value = 0.2;
+          bgmSource.connect(bgmGain).connect(dest);
+        } catch (e) {
+          console.warn("[FastExport] BGM decode failed:", e);
+        }
+      }
+
+      // Combine: canvas video track + mixed audio track
+      const combinedStream = new MediaStream();
+      canvasStream.getVideoTracks().forEach(t => combinedStream.addTrack(t));
+      dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+
+      // 3. MediaRecorder
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+        ? "video/webm;codecs=vp9,opus"
+        : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+        ? "video/webm;codecs=vp8,opus"
+        : "video/webm";
+
+      const recorder = new MediaRecorder(combinedStream, {
+        mimeType,
+        videoBitsPerSecond: quality === "high" ? 8_000_000 : quality === "medium" ? 4_000_000 : 2_000_000,
+      });
+
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+      const recorderDone = new Promise<Blob>((resolve, reject) => {
+        recorder.onstop = () => {
+          const webm = new Blob(chunks, { type: mimeType });
+          resolve(webm);
+        };
+        recorder.onerror = (e) => reject(e);
+      });
+
+      // 4. Playback at 1x — MediaRecorder records wall-clock time,
+      //    so speed-up would shorten the output video duration
+      v.muted = false;
+      v.volume = 0; // silent to user, but audio goes through AudioContext
+      v.currentTime = trimStart;
+      v.playbackRate = 1;
+
+      // Wait for seek
+      await new Promise<void>((res) => {
+        const onSeeked = () => { v.removeEventListener("seeked", onSeeked); res(); };
+        v.addEventListener("seeked", onSeeked);
+        setTimeout(res, 1000);
+      });
+
+      // Start recording & playback
+      recorder.start(100); // collect chunks every 100ms
+      bgmSource?.start(0);
+      await v.play().catch(() => {});
+
+      // 5. Render loop — use setInterval (NOT requestAnimationFrame)
+      //    rAF stops completely when tab is hidden/throttled, causing frozen frames.
+      //    setInterval is only throttled to 1Hz in background, much more reliable.
+      let running = true;
+      let lastProgressUpdate = 0;
+      let lastVideoTime = v.currentTime;
+      let stallCount = 0;
+
+      const RENDER_INTERVAL = Math.round(1000 / fps); // ~42ms for 24fps
+      const renderInterval = setInterval(() => {
+        if (!running) return;
+
+        // Stall detection: if video.currentTime hasn't moved for ~2s, video may have stalled
+        const ct = v.currentTime;
+        if (Math.abs(ct - lastVideoTime) < 0.01) {
+          stallCount++;
+          if (stallCount > 50) { // ~2 seconds at 24fps interval
+            console.warn("[FastExport] Video stalled at", ct.toFixed(2), "s, attempting resume...");
+            stallCount = 0;
+            // Try to resume: play() again in case it paused
+            v.play().catch(() => {});
+          }
+        } else {
+          stallCount = 0;
+          lastVideoTime = ct;
+        }
+
+        drawFrame();
+
+        // Throttle progress updates to ~4 Hz for smooth UI
+        const now = performance.now();
+        if (now - lastProgressUpdate > 250) {
+          const elapsed = ct - trimStart;
+          const prog = Math.min(1, elapsed / exportDuration);
+          setProgress(prog * 0.8); // 0-80% during recording
+          lastProgressUpdate = now;
+        }
+
+        if (ct >= trimEnd - 0.05) {
+          running = false;
+          clearInterval(renderInterval);
+          v.pause();
+          setProgress(0.8);
+          recorder.stop();
+        }
+      }, RENDER_INTERVAL);
+
+      // Also listen for video ended
+      const onEnded = () => {
+        if (running) {
+          running = false;
+          clearInterval(renderInterval);
+          recorder.stop();
+        }
+      };
+      v.addEventListener("ended", onEnded, { once: true });
+
+      // Safety timeout
+      const safetyMs = (exportDuration + 15) * 1000;
+      const safetyTimer = setTimeout(() => {
+        if (running) {
+          running = false;
+          clearInterval(renderInterval);
+          try { recorder.stop(); } catch {}
+        }
+      }, safetyMs);
+
+      // Wait for recording to finish
+      const webmBlob = await recorderDone;
+      clearTimeout(safetyTimer);
+      v.removeEventListener("ended", onEnded);
+
+      // Cleanup audio
+      bgmSource?.stop();
+      if (mediaSource) { try { mediaSource.disconnect(); } catch {} }
+      await audioCtx.close();
+
+      // Restore
+      v.playbackRate = 1;
+      v.muted = true;
+      v.volume = 1;
+      canvasRef.current = origCanvas;
+
+      console.log("[FastExport] WebM recorded:", (webmBlob.size / 1024).toFixed(0), "KB");
+
+      if (webmBlob.size < 1000) {
+        console.warn("[FastExport] WebM too small, falling back");
+        return false;
+      }
+
+      // 6. Remux WebM → MP4 via FFmpeg
+      setProgress(0.85);
+      const worker = await import("./lib/ffmpeg-worker");
+      const mp4Blob = await worker.remuxToMp4(webmBlob, (p) => setProgress(0.85 + p * 0.15));
+
+      setExportBlob(mp4Blob);
+      setPhase("done");
+      return true;
+    } catch (err) {
+      console.error("[FastExport] Failed:", err);
+      canvasRef.current = origCanvas;
+      v.playbackRate = 1;
+      v.muted = true;
+      v.volume = 1;
+      return false;
+    }
+  }, [videoFile, trimStart, trimEnd, outW, outH, quality, bgmData, drawFrame]);
+
+  /* ════════════════════════════════════════════
+     EXPORT — LEGACY (frame-by-frame seeking)
+     ════════════════════════════════════════════ */
+  const handleExportLegacy = useCallback(async () => {
     if (!videoFile || !videoRef.current) return;
-    setPhase("loading");
-    setProgress(0);
 
     try {
       const worker = await import("./lib/ffmpeg-worker");
@@ -882,29 +1250,23 @@ export default function ShortFormClient() {
 
       const v = videoRef.current;
 
-      // Pre-read file data
       let fileData = fileDataRef.current;
       if (!fileData) {
         console.log("[Export] fileDataRef empty, reading file now...");
         fileData = new Uint8Array(await videoFile.arrayBuffer());
       }
 
-      /* ── Phase 1: Capture frames through canvas (WYSIWYG) ──
-         Swap canvasRef to a full-res offscreen canvas, then call
-         the existing drawFrame() which renders ALL effects (crop,
-         vignette, letterbox, captions, watermark, intro/outro). */
       const exportCanvas = document.createElement("canvas");
       exportCanvas.width = outW;
       exportCanvas.height = outH;
       const origCanvas = canvasRef.current;
       canvasRef.current = exportCanvas;
 
-      const duration = trimEnd;
-      const fps = duration > 30 ? 15 : 24;
-      const totalFrames = Math.ceil(duration * fps);
+      const exportDuration = trimEnd - trimStart;
+      const fps = exportDuration > 30 ? 15 : 24;
+      const totalFrames = Math.ceil(exportDuration * fps);
       const frames: Uint8Array[] = [];
 
-      // Pause video for frame-by-frame seeking
       const wasPlaying = !v.paused;
       if (wasPlaying) {
         if (playPromiseRef.current) await playPromiseRef.current.catch(() => {});
@@ -913,7 +1275,6 @@ export default function ShortFormClient() {
         playPromiseRef.current = null;
       }
 
-      // Ensure video has decoded data (important on mobile)
       if (v.readyState < 2) {
         await new Promise<void>((res) => {
           const h = () => { v.removeEventListener("loadeddata", h); res(); };
@@ -922,13 +1283,12 @@ export default function ShortFormClient() {
         });
       }
 
-      console.log("[Export] Capturing", totalFrames, "frames at", fps, "fps,", outW + "x" + outH);
+      console.log("[Export Legacy] Capturing", totalFrames, "frames at", fps, "fps");
 
       for (let i = 0; i < totalFrames; i++) {
-        const time = i / fps;
-        if (time >= duration) break;
+        const time = trimStart + i / fps;
+        if (time >= trimEnd) break;
 
-        // Seek to target time
         v.currentTime = time;
         await new Promise<void>((res) => {
           let done = false;
@@ -938,10 +1298,8 @@ export default function ShortFormClient() {
           v.addEventListener("seeked", onSeeked);
         });
 
-        // drawFrame renders ALL effects onto canvasRef.current (the full-res canvas)
         drawFrame();
 
-        // Capture rendered frame as JPEG (with fallback for tainted canvas)
         let frameData: Uint8Array | null = null;
         try {
           const blob = await new Promise<Blob | null>((res) =>
@@ -950,46 +1308,35 @@ export default function ShortFormClient() {
           if (blob) {
             frameData = new Uint8Array(await blob.arrayBuffer());
           }
-        } catch (err: unknown) {
-          // Fallback: toBlob failed (tainted canvas), try toDataURL
-          console.warn("[Export] toBlob failed, using toDataURL fallback:", err);
+        } catch {
           try {
             const dataUrl = exportCanvas.toDataURL("image/jpeg", 0.85);
             const base64 = dataUrl.split(",")[1];
             const binary = atob(base64);
             const arr = new Uint8Array(binary.length);
-            for (let j = 0; j < binary.length; j++) {
-              arr[j] = binary.charCodeAt(j);
-            }
+            for (let j = 0; j < binary.length; j++) arr[j] = binary.charCodeAt(j);
             frameData = arr;
-          } catch (fallbackErr) {
-            console.error("[Export] Both toBlob and toDataURL failed:", fallbackErr);
-          }
+          } catch { /* skip frame */ }
         }
 
-        if (frameData) {
-          frames.push(frameData);
-        }
-
-        setProgress((i + 1) / totalFrames * 0.5); // 0-50%
+        if (frameData) frames.push(frameData);
+        setProgress((i + 1) / totalFrames * 0.5);
       }
 
-      // Restore preview canvas
       canvasRef.current = origCanvas;
-      console.log("[Export] Captured", frames.length, "frames, encoding...");
+      console.log("[Export Legacy] Captured", frames.length, "frames, encoding...");
 
-      /* ── Phase 2: Encode frames + audio with FFmpeg ── */
       const result = await worker.encodeFrames({
         frames,
         fps,
         originalVideo: fileData,
         originalName: videoFile.name,
-        trimStart: 0,
-        duration,
+        trimStart,
+        duration: exportDuration,
         bgmData: bgmData ?? undefined,
         bgmVolume: 0.2,
         quality,
-        onProgress: (p) => setProgress(0.5 + p * 0.5), // 50-100%
+        onProgress: (p) => setProgress(0.5 + p * 0.5),
       });
 
       setExportBlob(result);
@@ -999,7 +1346,25 @@ export default function ShortFormClient() {
       setError("Export failed");
       setPhase("preview");
     }
-  }, [videoFile, trimEnd, outW, outH, quality, bgmData, drawFrame]);
+  }, [videoFile, trimStart, trimEnd, outW, outH, quality, bgmData, drawFrame]);
+
+  /* ════════════════════════════════════════════
+     EXPORT — unified entry (fast → legacy fallback)
+     ════════════════════════════════════════════ */
+  const handleExport = useCallback(async () => {
+    if (!videoFile || !videoRef.current) return;
+    setPhase("loading");
+    setProgress(0);
+    setError("");
+
+    // Try fast path first
+    const ok = await handleExportFast();
+    if (ok) return;
+
+    // Fallback to legacy
+    console.log("[Export] Fast path failed, using legacy frame-by-frame...");
+    await handleExportLegacy();
+  }, [videoFile, handleExportFast, handleExportLegacy]);
 
   const handleDownload = useCallback(() => {
     if (!exportBlob) return;
@@ -1014,7 +1379,7 @@ export default function ShortFormClient() {
   const reset = useCallback(() => {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(null); setVideoUrl(""); setDuration(0);
-    setPlaying(false); setCurrentTime(0);
+    setPlaying(false); setCurrentTime(0); setTrimStart(0); setTrimEnd(0);
     setPhase("upload"); setExportBlob(null);
     setProgress(0); setError(""); setShowSettings(false);
     setCaptions([]); setCaptionPhase("idle"); setCaptionMsg("");
@@ -1023,7 +1388,88 @@ export default function ShortFormClient() {
     setVignetteOn(true); setParticlesOn(true); setLetterbox("thin");
     particlesRef.current = []; particleInitRef.current = false;
     fileDataRef.current = null;
+    // YouTube reset
+    setYtPhase("idle"); setYtProgress(0); setYtVideoId(""); setYtError(""); setYtTitle(""); setYtPrivacy("private");
+    ytPendingRef.current = false;
   }, [videoUrl]);
+
+  /* ════════════════════════════════════════════
+     YOUTUBE — Google Identity Services OAuth
+     ════════════════════════════════════════════ */
+
+  // Load GIS script
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (document.querySelector('script[src*="accounts.google.com/gsi/client"]')) return;
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+  }, []);
+
+  // Initialize GIS token client
+  const initGisTokenClient = useCallback(() => {
+    if (gisTokenClientRef.current) return gisTokenClientRef.current;
+    if (!window.google) return null;
+
+    gisTokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: YT_SCOPE,
+      callback: (response: GisTokenResponse) => {
+        if (response.access_token && ytPendingRef.current && exportBlob) {
+          ytPendingRef.current = false;
+          doYoutubeUpload(response.access_token, exportBlob);
+        } else if (response.error) {
+          setYtPhase("error");
+          setYtError(response.error);
+        }
+      },
+    });
+    return gisTokenClientRef.current;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportBlob]);
+
+  // Perform the actual upload
+  const doYoutubeUpload = useCallback(async (token: string, blob: Blob) => {
+    setYtPhase("uploading");
+    setYtProgress(0);
+    setYtError("");
+
+    try {
+      const result = await uploadToYouTube({
+        token,
+        blob,
+        title: ytTitle || "Short",
+        description: `${ytTitle || "Short"} — Made with SUILE (suile.im)`,
+        privacy: ytPrivacy,
+        onProgress: (r) => setYtProgress(r),
+      });
+
+      setYtVideoId(result.videoId);
+      setYtPhase("done");
+    } catch (err) {
+      console.error("[YouTube Upload]", err);
+      setYtPhase("error");
+      setYtError(err instanceof Error ? err.message : "Upload failed");
+    }
+  }, [ytTitle, ytPrivacy]);
+
+  // Entry point: request OAuth then upload
+  const handleYoutubeUpload = useCallback(() => {
+    if (!exportBlob) return;
+
+    const client = initGisTokenClient();
+    if (!client) {
+      setYtPhase("error");
+      setYtError(t.ytGoogleError);
+      return;
+    }
+
+    ytPendingRef.current = true;
+    setYtPhase("auth");
+    client.requestAccessToken();
+  }, [exportBlob, initGisTokenClient, t]);
 
   /* ═══════════════════════════════════════════════
      RENDER — UPLOAD
@@ -1150,13 +1596,13 @@ export default function ShortFormClient() {
               </p>
               {phase === "encoding" && (
                 <div className="w-48">
-                  <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
+                  <div className="h-2.5 bg-zinc-700 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.max(5, progress * 100)}%` }}
+                      className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full"
+                      style={{ width: `${Math.max(3, progress * 100)}%` }}
                     />
                   </div>
-                  <p className="text-zinc-400 text-xs text-center mt-1">{Math.round(progress * 100)}%</p>
+                  <p className="text-zinc-300 text-xs text-center mt-1.5 font-bold">{Math.round(progress * 100)}%</p>
                 </div>
               )}
             </div>
@@ -1173,7 +1619,7 @@ export default function ShortFormClient() {
         </div>
 
         {/* Timeline scrubber */}
-        {(phase === "preview" || phase === "done") && duration > 0 && (
+        {(phase === "preview" || phase === "done") && duration > 0 && !needsRangeSelect && (
           <div style={{ width: canvasW }} className="mt-1">
             <div
               ref={timelineRef}
@@ -1187,13 +1633,13 @@ export default function ShortFormClient() {
                 {/* Filled portion */}
                 <div
                   className="h-full bg-violet-500 rounded-full"
-                  style={{ width: `${trimEnd > 0 ? (currentTime / trimEnd) * 100 : 0}%` }}
+                  style={{ width: `${trimDuration > 0 ? ((currentTime - trimStart) / trimDuration) * 100 : 0}%` }}
                 />
               </div>
               {/* Thumb */}
               <div
                 className="absolute w-3.5 h-3.5 bg-white border-2 border-violet-500 rounded-full shadow-md -translate-x-1/2 pointer-events-none"
-                style={{ left: `${trimEnd > 0 ? (currentTime / trimEnd) * 100 : 0}%` }}
+                style={{ left: `${trimDuration > 0 ? ((currentTime - trimStart) / trimDuration) * 100 : 0}%` }}
               />
             </div>
             <div className="flex justify-between text-[10px] text-zinc-500 -mt-1 px-0.5">
@@ -1203,10 +1649,67 @@ export default function ShortFormClient() {
           </div>
         )}
 
+        {/* Range-select timeline (for videos > 60s) */}
+        {(phase === "preview" || phase === "done") && duration > 0 && needsRangeSelect && (
+          <div style={{ width: canvasW }} className="mt-1">
+            <div
+              ref={rangeRef}
+              className="relative w-full h-10 flex items-center touch-none"
+              onPointerMove={onRangePointerMove}
+              onPointerUp={onRangePointerUp}
+              onClick={(e) => { if (!rangeDragging) seekInRange(e.clientX); }}
+            >
+              {/* Full track background */}
+              <div className="absolute left-0 right-0 h-1.5 bg-zinc-300 dark:bg-zinc-700 rounded-full" />
+              {/* Selected range highlight */}
+              <div
+                className="absolute h-1.5 bg-violet-500/40 rounded-full"
+                style={{
+                  left: `${(trimStart / duration) * 100}%`,
+                  width: `${((trimEnd - trimStart) / duration) * 100}%`,
+                }}
+              />
+              {/* Playback position within range */}
+              <div
+                className="absolute w-2 h-2 bg-white border-2 border-violet-500 rounded-full -translate-x-1/2 pointer-events-none z-10"
+                style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+              />
+              {/* Start handle */}
+              <div
+                className="absolute z-20 flex items-center justify-center cursor-ew-resize"
+                style={{ left: `${(trimStart / duration) * 100}%`, transform: "translateX(-50%)" }}
+                onPointerDown={(e) => onRangePointerDown("start", e)}
+              >
+                <div className="w-6 h-10 flex items-center justify-center">
+                  <div className="w-1.5 h-6 bg-violet-500 rounded-sm shadow" />
+                </div>
+              </div>
+              {/* End handle */}
+              <div
+                className="absolute z-20 flex items-center justify-center cursor-ew-resize"
+                style={{ left: `${(trimEnd / duration) * 100}%`, transform: "translateX(-50%)" }}
+                onPointerDown={(e) => onRangePointerDown("end", e)}
+              >
+                <div className="w-6 h-10 flex items-center justify-center">
+                  <div className="w-1.5 h-6 bg-violet-500 rounded-sm shadow" />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-between text-[10px] text-zinc-500 -mt-1 px-0.5">
+              <span>{formatTime(trimStart)}</span>
+              <span className="text-violet-500 font-bold">{formatTime(currentTime)}</span>
+              <span>{formatTime(trimEnd)}</span>
+            </div>
+            <p className="text-[10px] text-zinc-400 text-center mt-0.5">
+              {t.trimRange(fmtSec(trimEnd - trimStart), fmtSec(duration))}
+            </p>
+          </div>
+        )}
+
         {/* Video info */}
-        {phase === "preview" && (
+        {phase === "preview" && !needsRangeSelect && (
           <p className="text-xs text-zinc-500 text-center">
-            {duration > MAX_DUR ? t.trimInfo(fmtSec(trimEnd)) : t.trimFull(fmtSec(duration))}
+            {t.trimFull(fmtSec(duration))}
           </p>
         )}
 
@@ -1420,7 +1923,7 @@ export default function ShortFormClient() {
             </button>
           )}
 
-          {/* Download */}
+          {/* Download + YouTube */}
           {phase === "done" && exportBlob && (
             <>
               <button
@@ -1429,6 +1932,85 @@ export default function ShortFormClient() {
               >
                 <Download size={20} /> {t.download}
               </button>
+
+              {/* YouTube Direct Upload Section */}
+              {ytPhase === "done" && ytVideoId ? (
+                <a
+                  href={`https://youtube.com/shorts/${ytVideoId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-red-600 to-red-500 text-white font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-red-500/20 hover:from-red-500 hover:to-red-400"
+                >
+                  <Check size={16} />
+                  {t.ytWatch}
+                </a>
+              ) : ytPhase === "uploading" ? (
+                <div className="w-full rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                    <Loader2 size={14} className="animate-spin text-red-500" />
+                    {t.ytUploading}
+                  </div>
+                  <div className="h-2 bg-zinc-300 dark:bg-zinc-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-red-500 to-red-400 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(3, ytProgress * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-zinc-500 text-center font-bold">{Math.round(ytProgress * 100)}%</p>
+                </div>
+              ) : (
+                <div className="w-full rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 space-y-3">
+                  {/* Title input */}
+                  <div>
+                    <label className="text-[10px] text-zinc-500 font-bold mb-1 block">{t.ytTitle}</label>
+                    <input
+                      type="text"
+                      value={ytTitle}
+                      onChange={e => setYtTitle(e.target.value)}
+                      placeholder={t.ytTitlePlaceholder}
+                      maxLength={100}
+                      className="w-full px-3 py-2 rounded-lg bg-zinc-200 dark:bg-zinc-800 text-sm text-zinc-700 dark:text-zinc-300 placeholder-zinc-400 outline-none focus:ring-2 focus:ring-red-500 transition"
+                    />
+                  </div>
+                  {/* Privacy selector */}
+                  <div>
+                    <label className="text-[10px] text-zinc-500 font-bold mb-1 block">{t.ytPrivacy}</label>
+                    <div className="flex gap-1.5">
+                      {(["private", "unlisted", "public"] as const).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => setYtPrivacy(p)}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition ${
+                            ytPrivacy === p
+                              ? "bg-red-600 text-white"
+                              : "bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-300 dark:hover:bg-zinc-700"
+                          }`}
+                        >
+                          {p === "private" ? t.ytPrivate : p === "unlisted" ? t.ytUnlisted : t.ytPublic}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Error */}
+                  {ytPhase === "error" && ytError && (
+                    <p className="text-xs text-red-500 font-bold">{t.ytError}: {ytError}</p>
+                  )}
+                  {/* Upload button */}
+                  <button
+                    onClick={handleYoutubeUpload}
+                    disabled={ytPhase === "auth"}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-red-500/20 disabled:opacity-50"
+                  >
+                    {ytPhase === "auth" ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.38.55A3.02 3.02 0 00.5 6.19 31.6 31.6 0 000 12a31.6 31.6 0 00.5 5.81 3.02 3.02 0 002.12 2.14c1.88.55 9.38.55 9.38.55s7.5 0 9.38-.55a3.02 3.02 0 002.12-2.14A31.6 31.6 0 0024 12a31.6 31.6 0 00-.5-5.81zM9.75 15.02V8.98L15.5 12l-5.75 3.02z"/></svg>
+                    )}
+                    {t.ytUpload}
+                  </button>
+                </div>
+              )}
+
               <p className="text-xs text-zinc-400 text-center">{t.size((exportBlob.size / 1024 / 1024).toFixed(1))}</p>
             </>
           )}

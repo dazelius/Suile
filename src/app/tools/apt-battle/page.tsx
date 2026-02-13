@@ -18,13 +18,13 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [{ url: "/og-qr.png", width: 800, height: 800, alt: "아파트 배틀" }],
+    images: [{ url: "/og-apt-battle.png", width: 1200, height: 630, alt: "아파트 배틀" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "아파트 배틀 - 전국 부동산 실거래가 비교",
     description: "전국 아파트 실거래가로 평당가 상승률 대결!",
-    images: ["/og-qr.png"],
+    images: ["/og-apt-battle.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/apt-battle`,

@@ -18,13 +18,13 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [{ url: "/og-qr.png", width: 800, height: 800, alt: "주식 성적표" }],
+    images: [{ url: "/og-stock-score.png", width: 1200, height: 630, alt: "주식 성적표" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "주식 성적표 - S&P 500 투자 점수",
     description: "S&P 500 전 종목 자동 채점! 100점 만점 투자 성적표.",
-    images: ["/og-qr.png"],
+    images: ["/og-stock-score.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/stock-score`,

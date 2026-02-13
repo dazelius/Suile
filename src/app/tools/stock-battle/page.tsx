@@ -18,13 +18,13 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [{ url: "/og-qr.png", width: 800, height: 800, alt: "주식 배틀" }],
+    images: [{ url: "/og-stock-battle.png", width: 1200, height: 630, alt: "주식 배틀" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "주식 배틀 - Stock Battle",
     description: "두 종목의 수익률을 대결시켜 보세요!",
-    images: ["/og-qr.png"],
+    images: ["/og-stock-battle.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/stock-battle`,

@@ -20,20 +20,13 @@ export const metadata: Metadata = {
   openGraph: {
     title: "AI 얼굴 평가 - SUILE",
     description: "AI가 당신의 얼굴을 정밀 분석! 점수, 나이, 닮은 연예인까지",
-    images: [
-      {
-        url: `${siteConfig.url}/face-score-og.png`,
-        width: 800,
-        height: 800,
-        alt: "SUILE - AI 얼굴 평가",
-      },
-    ],
+    images: [{ url: "/og-face-score.png", width: 1200, height: 630, alt: "SUILE - AI 얼굴 평가" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "AI 얼굴 평가 - SUILE",
     description: "AI가 당신의 얼굴을 정밀 분석! 점수, 나이, 닮은 연예인까지",
-    images: [`${siteConfig.url}/face-score-og.png`],
+    images: ["/og-face-score.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/face-score`,

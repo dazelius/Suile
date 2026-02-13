@@ -11,6 +11,7 @@ import { TickerSearch } from "./TickerSearch";
 import { BattleAnimation } from "./BattleAnimation";
 import { BattleChart } from "./BattleChart";
 import { StockLogo } from "./StockLogo";
+import { initAudio } from "./sfx";
 
 interface PricePoint {
   date: string;
@@ -70,6 +71,7 @@ export function StockBattleClient() {
 
   const fetchBattle = useCallback(async () => {
     if (!tickerA || !tickerB) return;
+    await initAudio(); // 사용자 클릭 → AudioContext 생성 + WAV 프리로드
     setLoading(true);
     setError(null);
     setResult(null);

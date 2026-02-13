@@ -137,6 +137,24 @@
         ]
       },
       {
+        "source": "og.png",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "og-*.png",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
         "source": "**/*.@(png|jpg|jpeg|gif|svg|webp|ico)",
         "headers": [
           {

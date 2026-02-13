@@ -21,14 +21,14 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [{ url: "/og-qr.png", width: 800, height: 800, alt: "숏폼 편집기" }],
+    images: [{ url: "/og-short-form.png", width: 1200, height: 630, alt: "숏폼 편집기" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "숏폼 편집기 — 브라우저에서 바로 편집!",
     description:
       "트리밍 + 세로 크롭 + 자막. 서버 없이 브라우저에서 숏폼 영상 편집.",
-    images: ["/og-qr.png"],
+    images: ["/og-short-form.png"],
   },
   alternates: {
     canonical: `${siteConfig.url}/tools/short-form`,

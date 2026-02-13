@@ -498,3 +498,60 @@ async function cleanupFrameFiles(ff: any, count: number) {
   }
   await Promise.all(batch);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Remux WebM → MP4  (container change only, no re-encoding)
+   Used by the fast MediaRecorder-based export path.
+   ══════════════════════════════════════════════════════════════ */
+
+export async function remuxToMp4(
+  webmBlob: Blob,
+  onProgress?: (ratio: number) => void,
+): Promise<Blob> {
+  console.log("[Remux] WebM → MP4, input:", (webmBlob.size / 1024).toFixed(0), "KB");
+  const ff = await withTimeout(getFFmpeg(), 120_000, "FFmpeg load");
+
+  try {
+    ff.on("progress", ({ progress: p }: { progress: number }) => {
+      onProgress?.(Math.min(1, Math.max(0, isNaN(p) ? 0 : p)));
+    });
+  } catch { /* ignore */ }
+
+  const inData = new Uint8Array(await webmBlob.arrayBuffer());
+  await ff.writeFile("rec.webm", inData);
+
+  // Try codec copy first (fastest — just repackage)
+  let ret = await withTimeout(ff.exec([
+    "-i", "rec.webm",
+    "-c", "copy",
+    "-movflags", "+faststart",
+    "-y", "out.mp4",
+  ]), 120_000, "Remux copy");
+
+  if (ret !== 0) {
+    // Fallback: re-encode video (vp8/vp9 → h264) — still fast on short videos
+    console.log("[Remux] Copy failed, re-encoding...");
+    ret = await withTimeout(ff.exec([
+      "-i", "rec.webm",
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+      "-c:a", "aac", "-b:a", "128k",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "-y", "out.mp4",
+    ]), 300_000, "Remux re-encode");
+  }
+
+  if (ret !== 0) {
+    try { await ff.deleteFile("rec.webm"); } catch { /* */ }
+    throw new Error(`Remux failed: ${ret}`);
+  }
+
+  const data = await ff.readFile("out.mp4");
+  console.log("[Remux] Done!", (data as Uint8Array).length, "bytes");
+
+  for (const f of ["rec.webm", "out.mp4"]) {
+    try { await ff.deleteFile(f); } catch { /* */ }
+  }
+
+  return new Blob([new Uint8Array(data as Uint8Array)], { type: "video/mp4" });
+}

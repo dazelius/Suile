@@ -89,6 +89,10 @@ export interface Translations {
   toolHeartRateName: string;
   toolHeartRateDesc: string;
 
+  // ── 나라 배틀로얄 ──
+  toolCountryBattleName: string;
+  toolCountryBattleDesc: string;
+
   // ── 연봉 실수령액 계산기 ──
   toolSalaryCalcName: string;
   toolSalaryCalcDesc: string;
@@ -255,6 +259,8 @@ const ko: Translations = {
   toolStockScoreDesc: "S&P 500 전 종목 자동 채점! 100점 만점 투자 성적표",
   toolStockRoyaleName: "주식 배틀로얄",
   toolStockRoyaleDesc: "주식 데이터를 RPG 스탯으로! 8개 종목의 배틀로얄",
+  toolCountryBattleName: "나라 배틀로얄",
+  toolCountryBattleDesc: "8개국 경제 데이터로 구슬 배틀! GDP, 인플레, 실업률이 스탯이 된다",
   toolShortFormName: "숏폼 편집기",
   toolShortFormDesc: "브라우저에서 바로 편집! 트리밍, 세로 크롭, 자막 추가까지",
 
@@ -429,6 +435,8 @@ const en: Translations = {
   toolStockScoreDesc: "Auto-grade all S&P 500 stocks! 100-point investment score",
   toolStockRoyaleName: "Stock Battle Royale",
   toolStockRoyaleDesc: "Stock data as RPG stats! 8-stock battle royale",
+  toolCountryBattleName: "Country Battle Royale",
+  toolCountryBattleDesc: "8 nations clash with economic data! GDP, inflation, unemployment as stats",
   toolShortFormName: "Short-form Editor",
   toolShortFormDesc: "Edit in your browser! Trim, vertical crop, and add captions",
 

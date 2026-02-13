@@ -11,20 +11,13 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     locale: "ko_KR",
     type: "website",
-    images: [
-      {
-        url: `${siteConfig.url}/og-qr.png`,
-        width: 800,
-        height: 800,
-        alt: "SUILE - QR 비밀 메시지",
-      },
-    ],
+    images: [{ url: "/og-qr-letter.png", width: 1200, height: 630, alt: "SUILE - QR 비밀 메시지" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "비밀 메시지가 도착했어요",
     description: "누군가 보낸 비밀 메시지를 확인하세요.",
-    images: [`${siteConfig.url}/og-qr.png`],
+    images: ["/og-qr-letter.png"],
   },
 };
 
