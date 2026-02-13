@@ -7,7 +7,8 @@ export type ToolCategory =
   | "generator"
   | "lifestyle"
   | "developer"
-  | "finance";
+  | "finance"
+  | "game";
 
 export interface ToolConfig {
   id: string;

@@ -277,6 +277,8 @@ export default function ShortFormClient() {
   const [phase, setPhase] = useState<"upload" | "preview" | "loading" | "encoding" | "done">("upload");
   const [progress, setProgress] = useState(0);
   const [exportBlob, setExportBlob] = useState<Blob | null>(null);
+  // Keep ref in sync so GIS callback always sees latest blob
+  useEffect(() => { exportBlobRef.current = exportBlob; }, [exportBlob]);
   const [error, setError] = useState("");
 
   // ─── AI Captions ───
@@ -311,6 +313,7 @@ export default function ShortFormClient() {
   const [ytPrivacy, setYtPrivacy] = useState<PrivacyStatus>("private");
   const gisTokenClientRef = useRef<GisTokenClient | null>(null);
   const ytPendingRef = useRef(false);
+  const exportBlobRef = useRef<Blob | null>(null);
 
   // ─── Trim Range ───
   const [trimStart, setTrimStart] = useState(0);
@@ -1408,7 +1411,7 @@ export default function ShortFormClient() {
     document.head.appendChild(script);
   }, []);
 
-  // Initialize GIS token client
+  // Initialize GIS token client (singleton — uses refs to avoid stale closures)
   const initGisTokenClient = useCallback(() => {
     if (gisTokenClientRef.current) return gisTokenClientRef.current;
     if (!window.google) return null;
@@ -1417,9 +1420,15 @@ export default function ShortFormClient() {
       client_id: GOOGLE_CLIENT_ID,
       scope: YT_SCOPE,
       callback: (response: GisTokenResponse) => {
-        if (response.access_token && ytPendingRef.current && exportBlob) {
+        const blob = exportBlobRef.current;
+        if (response.access_token && ytPendingRef.current && blob) {
           ytPendingRef.current = false;
-          doYoutubeUpload(response.access_token, exportBlob);
+          doYoutubeUpload(response.access_token, blob);
+        } else if (response.access_token && !blob) {
+          // Auth succeeded but no blob — should not happen
+          console.error("[YouTube] Auth OK but no export blob available");
+          setYtPhase("error");
+          setYtError("No video to upload. Please export first.");
         } else if (response.error) {
           setYtPhase("error");
           setYtError(response.error);
@@ -1428,10 +1437,11 @@ export default function ShortFormClient() {
     });
     return gisTokenClientRef.current;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exportBlob]);
+  }, []);
 
   // Perform the actual upload
   const doYoutubeUpload = useCallback(async (token: string, blob: Blob) => {
+    console.log("[YouTube] Starting upload, blob size:", (blob.size / 1024 / 1024).toFixed(2), "MB, type:", blob.type);
     setYtPhase("uploading");
     setYtProgress(0);
     setYtError("");
@@ -1443,13 +1453,17 @@ export default function ShortFormClient() {
         title: ytTitle || "Short",
         description: `${ytTitle || "Short"} — Made with SUILE (suile.im)`,
         privacy: ytPrivacy,
-        onProgress: (r) => setYtProgress(r),
+        onProgress: (r) => {
+          console.log("[YouTube] Upload progress:", (r * 100).toFixed(1) + "%");
+          setYtProgress(r);
+        },
       });
 
+      console.log("[YouTube] Upload complete! Video ID:", result.videoId, "URL:", result.url);
       setYtVideoId(result.videoId);
       setYtPhase("done");
     } catch (err) {
-      console.error("[YouTube Upload]", err);
+      console.error("[YouTube Upload] Error:", err);
       setYtPhase("error");
       setYtError(err instanceof Error ? err.message : "Upload failed");
     }
@@ -1457,7 +1471,11 @@ export default function ShortFormClient() {
 
   // Entry point: request OAuth then upload
   const handleYoutubeUpload = useCallback(() => {
-    if (!exportBlob) return;
+    if (!exportBlobRef.current) {
+      setYtPhase("error");
+      setYtError("No video to upload. Please export first.");
+      return;
+    }
 
     const client = initGisTokenClient();
     if (!client) {
@@ -1469,7 +1487,7 @@ export default function ShortFormClient() {
     ytPendingRef.current = true;
     setYtPhase("auth");
     client.requestAccessToken();
-  }, [exportBlob, initGisTokenClient, t]);
+  }, [initGisTokenClient, t]);
 
   /* ═══════════════════════════════════════════════
      RENDER — UPLOAD

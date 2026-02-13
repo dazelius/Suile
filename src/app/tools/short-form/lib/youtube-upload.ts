@@ -54,6 +54,10 @@ export async function uploadToYouTube({
     },
   };
 
+  console.log("[YT-Upload] Step 1: Starting resumable session...");
+  console.log("[YT-Upload] Blob size:", blob.size, "type:", blob.type || "video/mp4");
+  console.log("[YT-Upload] Metadata:", JSON.stringify(metadata));
+
   const initRes = await fetch(YT_UPLOAD_URL, {
     method: "POST",
     headers: {
@@ -66,17 +70,24 @@ export async function uploadToYouTube({
   });
 
   if (!initRes.ok) {
-    const err = await initRes.json().catch(() => ({ error: { message: `HTTP ${initRes.status}` } }));
-    const msg = err?.error?.message || `Upload init failed: ${initRes.status}`;
+    const errBody = await initRes.text().catch(() => "");
+    console.error("[YT-Upload] Init failed:", initRes.status, errBody);
+    let msg = `Upload init failed: ${initRes.status}`;
+    try {
+      const err = JSON.parse(errBody);
+      msg = err?.error?.message || msg;
+    } catch { /* not json */ }
     throw new Error(msg);
   }
 
   const uploadUrl = initRes.headers.get("Location");
+  console.log("[YT-Upload] Upload URL:", uploadUrl ? "obtained" : "MISSING");
   if (!uploadUrl) {
     throw new Error("YouTube did not return an upload URL");
   }
 
   // ── Step 2: 영상 blob 업로드 (XMLHttpRequest for progress) ──
+  console.log("[YT-Upload] Step 2: Uploading video blob...");
   const result = await new Promise<UploadResult>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", uploadUrl, true);
@@ -89,22 +100,33 @@ export async function uploadToYouTube({
     };
 
     xhr.onload = () => {
+      console.log("[YT-Upload] XHR onload, status:", xhr.status);
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const data = JSON.parse(xhr.responseText);
+          console.log("[YT-Upload] Success! Response:", JSON.stringify(data).slice(0, 500));
           const videoId = data.id;
+          if (!videoId) {
+            reject(new Error("YouTube returned success but no video ID"));
+            return;
+          }
           resolve({
             videoId,
             url: `https://youtube.com/shorts/${videoId}`,
           });
         } catch {
+          console.error("[YT-Upload] Failed to parse response:", xhr.responseText?.slice(0, 500));
           reject(new Error("Failed to parse YouTube response"));
         }
       } else {
+        console.error("[YT-Upload] Upload failed:", xhr.status, xhr.responseText?.slice(0, 500));
         let msg = `Upload failed: ${xhr.status}`;
         try {
           const err = JSON.parse(xhr.responseText);
           msg = err?.error?.message || msg;
+          // Common errors
+          if (xhr.status === 403) msg = "YouTube API quota exceeded or upload permission denied. " + msg;
+          if (xhr.status === 401) msg = "Authentication expired. Please try again. " + msg;
         } catch { /* ignore */ }
         reject(new Error(msg));
       }

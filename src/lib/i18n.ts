@@ -50,6 +50,8 @@ export interface Translations {
   catDeveloperDesc: string;
   catFinance: string;
   catFinanceDesc: string;
+  catGame: string;
+  catGameDesc: string;
 
   // ── 주식 배틀 도구 ──
   toolStockBattleName: string;
@@ -242,6 +244,8 @@ const ko: Translations = {
   catDeveloperDesc: "JSON, Base64, URL 인코딩 등 개발 도구",
   catFinance: "금융",
   catFinanceDesc: "주식, 투자, 금융 관련 도구",
+  catGame: "게임",
+  catGameDesc: "배틀로얄, 시뮬레이션 등 데이터 기반 게임",
 
   toolStockBattleName: "주식 배틀",
   toolStockBattleDesc: "두 종목의 수익률을 대결시켜 보세요!",
@@ -418,6 +422,8 @@ const en: Translations = {
   catDeveloperDesc: "JSON, Base64, URL encoding tools",
   catFinance: "Finance",
   catFinanceDesc: "Stocks, investment, and financial tools",
+  catGame: "Games",
+  catGameDesc: "Battle royale, simulation, and data-driven games",
 
   toolStockBattleName: "Stock Battle",
   toolStockBattleDesc: "Battle the returns of two stocks!",

@@ -68,6 +68,13 @@ export const categories: CategoryConfig[] = [
     icon: "TrendingUp",
     description: "주식, 투자, 금융 관련 도구",
   },
+  {
+    id: "game",
+    name: "게임",
+    nameKey: "catGame",
+    icon: "Gamepad2",
+    description: "배틀로얄, 시뮬레이션 등 데이터 기반 게임",
+  },
 ];
 
 // ============================================
@@ -202,7 +209,7 @@ export const tools: ToolConfig[] = [
     nameKey: "toolStockRoyaleName",
     descriptionKey: "toolStockRoyaleDesc",
     description: "주식 데이터를 RPG 스탯으로 변환! 8개 종목의 배틀로얄",
-    category: "finance",
+    category: "game",
     icon: "Swords",
     path: "/tools/stock-royale",
     isNew: true,
@@ -215,7 +222,7 @@ export const tools: ToolConfig[] = [
     nameKey: "toolCountryBattleName",
     descriptionKey: "toolCountryBattleDesc",
     description: "8개국 경제 데이터로 구슬 배틀! GDP, 인플레, 실업률이 스탯이 된다",
-    category: "finance",
+    category: "game",
     icon: "Globe",
     path: "/tools/country-battle",
     isNew: true,

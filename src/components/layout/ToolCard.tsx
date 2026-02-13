@@ -20,6 +20,9 @@ import {
   Mic,
   Wallet,
   Swords,
+  Globe,
+  Gamepad2,
+  Scissors,
   ChevronRight,
   LucideIcon,
 } from "lucide-react";
@@ -48,6 +51,9 @@ const iconMap: Record<string, LucideIcon> = {
   Mic,
   Wallet,
   Swords,
+  Globe,
+  Gamepad2,
+  Scissors,
 };
 
 interface ToolCardProps {
