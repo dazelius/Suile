@@ -51,6 +51,8 @@ interface Marble {
   isClone: boolean;        // shadow-clone
   cloneLife: number;       // frames until auto-death
   ultBuffTimer: number;    // frames of rage-burst etc.
+  phaseTimer: number;      // frames of collision pass-through (flash-slash)
+  freezeTimer: number;     // deep freeze (frost-field): near-zero speed + blue tint
 }
 
 interface FloatingText {
@@ -248,6 +250,8 @@ function createMarbles(fighters: Fighter[], W: number, H: number): Marble[] {
       isClone: false,
       cloneLife: 0,
       ultBuffTimer: 0,
+      phaseTimer: 0,
+      freezeTimer: 0,
     };
   });
 }
@@ -328,7 +332,7 @@ function physicsStep(
               skillTimer: 0, skillActivated: false, skillBuff: 0,
               hitCounter: 0, slowTimer: 0, atkDebuffTimer: 0, bpCount: 0,
               ultGauge: 0, ultFired: true, ultEffectPending: false,
-              isClone: true, cloneLife: 360, ultBuffTimer: 0,
+              isClone: true, cloneLife: 360, ultBuffTimer: 0, phaseTimer: 0, freezeTimer: 0,
             };
             marbles.push(clone);
             for (let k = 0; k < 8; k++) { const a2 = Math.random() * Math.PI * 2; particles.push({ x: clone.x, y: clone.y, vx: Math.cos(a2) * 3, vy: Math.sin(a2) * 3, life: 18, color: col, size: 2 + Math.random() * 3 }); }
@@ -348,7 +352,9 @@ function physicsStep(
             const dx = target.x - m.x, dy = target.y - m.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
             const nx = dx / dist, ny = dy / dist;
-            const dashDist = Math.min(dist + 100, W * 0.7);
+            // Dash all the way to the edge of the field
+            const diag = Math.sqrt(W * W + H * H);
+            const dashDist = diag;
             // Damage everything in the line
             for (const o of others) {
               const ox = o.x - m.x, oy = o.y - m.y;
@@ -364,23 +370,24 @@ function physicsStep(
                 o.flashTimer = 15;
               }
             }
-            // ── Slash line visual (drawn across screen) ──
+            // ── Slash line visual — full screen pierce ──
             const endX = startX + nx * dashDist;
             const endY = startY + ny * dashDist;
-            slashLines.push({ x1: startX, y1: startY, x2: endX, y2: endY, life: 45, maxLife: 45, color: col, width: 8 });
+            slashLines.push({ x1: startX, y1: startY, x2: endX, y2: endY, life: 50, maxLife: 50, color: col, width: 10 });
             // Second thinner cross-slash for style
-            slashLines.push({ x1: startX + ny * 30, y1: startY - nx * 30, x2: endX - ny * 30, y2: endY + nx * 30, life: 40, maxLife: 40, color: "#ffffff", width: 3 });
-            camera.slowMo = Math.max(camera.slowMo, 40);
-            // Slash trail particles
-            for (let k = 0; k < 30; k++) {
+            slashLines.push({ x1: startX + ny * 30, y1: startY - nx * 30, x2: endX - ny * 30, y2: endY + nx * 30, life: 45, maxLife: 45, color: "#ffffff", width: 3 });
+            camera.slowMo = Math.max(camera.slowMo, 45);
+            // Slash trail particles (more, along full path)
+            for (let k = 0; k < 45; k++) {
               const t = Math.random() * dashDist;
               particles.push({ x: startX + nx * t + (Math.random() - 0.5) * 20, y: startY + ny * t + (Math.random() - 0.5) * 20, vx: ny * (Math.random() - 0.5) * 4, vy: -nx * (Math.random() - 0.5) * 4, life: 25 + Math.random() * 15, color: Math.random() > 0.5 ? col : "#ffffff", size: 2 + Math.random() * 4 });
             }
-            // Teleport user to end of dash
-            m.x += nx * dashDist * 0.8;
-            m.y += ny * dashDist * 0.8;
+            // Teleport user to far end — phase through all collisions
+            m.x += nx * dashDist;
+            m.y += ny * dashDist;
             m.x = clamp(m.x, m.radius, W - m.radius);
             m.y = clamp(m.y, m.radius, H - m.radius);
+            m.phaseTimer = 25; // pass through marbles after dash
           }
           logs.push(isKo ? `${m.fighter.name} 일섬! 경로 전원 타격!` : `${m.fighter.name} Flash Slash!`);
           break;
@@ -491,11 +498,12 @@ function physicsStep(
             const dx = strongest.x - m.x, dy = strongest.y - m.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
             const nx = dx / dist, ny = dy / dist;
-            // Teleport to target (meteor charge)
+            // Teleport to target (meteor charge) — phase through collisions
             m.x = strongest.x - nx * (m.radius + strongest.radius + 5);
             m.y = strongest.y - ny * (m.radius + strongest.radius + 5);
             m.x = clamp(m.x, m.radius, W - m.radius);
             m.y = clamp(m.y, m.radius, H - m.radius);
+            m.phaseTimer = 15; // pass through after meteor impact
             // Slash line showing flight path
             slashLines.push({ x1: startX, y1: startY, x2: m.x, y2: m.y, life: 35, maxLife: 35, color: "#dc2626", width: 10 });
             slashLines.push({ x1: startX, y1: startY, x2: m.x, y2: m.y, life: 30, maxLife: 30, color: "#f97316", width: 4 });
@@ -537,17 +545,47 @@ function physicsStep(
           logs.push(isKo ? `${m.fighter.name} 메테오 돌진! ${strongest?.fighter.name} 착지 충격!` : `${m.fighter.name} Meteor Charge! Impact on ${strongest?.fighter.name}!`);
           break;
         }
-        // ═══ 9. 빙결장 — freeze all ═══
+        // ═══ 9. 빙결장 — deep freeze all enemies ═══
         case "frost-field": {
+          const freezeR = W * 0.55;
+          // Flash freeze all enemies
           for (const o of others) {
-            o.slowTimer = Math.max(o.slowTimer, 300); // 5s freeze
-            const dmg = Math.round(m.fighter.stats.atk * 1.2);
+            o.freezeTimer = Math.max(o.freezeTimer, 360); // 6s deep freeze
+            o.slowTimer = Math.max(o.slowTimer, 360);
+            const dmg = Math.round(m.fighter.stats.atk * 1.5);
             o.hp -= dmg;
-            texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#67e8f9", life: 40, size: 14 });
-            for (let k = 0; k < 4; k++) { const a2 = Math.random() * Math.PI * 2; particles.push({ x: o.x, y: o.y, vx: Math.cos(a2) * 2, vy: Math.sin(a2) * 2, life: 25, color: "#67e8f9", size: 2 + Math.random() * 3 }); }
+            o.vx *= 0.05; o.vy *= 0.05; // instantly near-stop
+            texts.push({ x: o.x, y: o.y - o.baseRadius - 14, text: `-${dmg}`, color: "#22d3ee", life: 50, size: 18 });
+            o.flashTimer = 25;
+            // Ice encasing burst per enemy
+            for (let k = 0; k < 10; k++) {
+              const a2 = Math.random() * Math.PI * 2;
+              const sp = 1 + Math.random() * 3;
+              particles.push({ x: o.x, y: o.y, vx: Math.cos(a2) * sp, vy: Math.sin(a2) * sp, life: 35, color: Math.random() > 0.4 ? "#67e8f9" : "#cffafe", size: 2 + Math.random() * 4 });
+            }
+            // Ice shard ring on each enemy
+            rings.push({ x: o.x, y: o.y, radius: 5, maxRadius: o.baseRadius * 2.5, life: 22, maxLife: 22, color: "#22d3ee", lineWidth: 3 });
           }
-          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: W * 0.6, life: 30, maxLife: 30, color: "#67e8f9", lineWidth: 4 });
-          for (let k = 0; k < 20; k++) { const a2 = Math.random() * Math.PI * 2; const r = Math.random() * W * 0.4; particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r, vx: 0, vy: -1, life: 40, color: "#67e8f9", size: 2 + Math.random() * 3, char: "❄" }); }
+          // Expanding freeze wave from caster — multiple rings
+          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: freezeR, life: 35, maxLife: 35, color: "#22d3ee", lineWidth: 6 });
+          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: freezeR * 0.7, life: 28, maxLife: 28, color: "#67e8f9", lineWidth: 3 });
+          rings.push({ x: m.x, y: m.y, radius: 10, maxRadius: freezeR * 0.4, life: 20, maxLife: 20, color: "#cffafe", lineWidth: 2 });
+          // Snowflake particles spread across field
+          for (let k = 0; k < 50; k++) {
+            const a2 = Math.random() * Math.PI * 2;
+            const r = Math.random() * freezeR;
+            particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r, vx: (Math.random() - 0.5) * 1, vy: -0.5 - Math.random(), life: 50 + Math.random() * 20, color: Math.random() > 0.3 ? "#67e8f9" : "#ffffff", size: 2 + Math.random() * 4, char: Math.random() > 0.6 ? "❄" : undefined });
+          }
+          // Ground frost sparkle particles
+          for (let k = 0; k < 30; k++) {
+            const a2 = Math.random() * Math.PI * 2;
+            const r = Math.random() * freezeR * 0.8;
+            particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r, vx: 0, vy: 0, life: 40 + Math.random() * 20, color: "#e0f2fe", size: 1 + Math.random() * 2 });
+          }
+          // Activate sustained freeze aura
+          m.ultBuffTimer = Math.max(m.ultBuffTimer, 360);
+          camera.slowMo = Math.max(camera.slowMo, 30);
+          shake.value = Math.max(shake.value, 8);
           logs.push(isKo ? `${m.fighter.name} 빙결장! 전원 빙결!` : `${m.fighter.name} Frost Field! All frozen!`);
           break;
         }
@@ -617,20 +655,52 @@ function physicsStep(
       // ── Thunder Storm: sustained lightning aura tick ──
       const hasThunder = m.fighter.skills.some(s => s.id === "thunder-storm");
       if (hasThunder && m.alive) {
-        const thunderRadius = 150;
-        // Lightning ring visual every 5 frames
-        if (m.ultBuffTimer % 5 === 0) {
-          const ringAng = (frame * 0.15) % (Math.PI * 2);
+        const thunderRadius = 160;
+        // ── Rotating lightning orbs every 2 frames (fast, dense) ──
+        if (m.ultBuffTimer % 2 === 0) {
+          const orbCount = 6;
+          const baseAng = (frame * 0.25) % (Math.PI * 2);
+          for (let k = 0; k < orbCount; k++) {
+            const a2 = baseAng + (k / orbCount) * Math.PI * 2;
+            const wobble = Math.sin(frame * 0.15 + k * 1.7) * 25;
+            const r = thunderRadius * 0.55 + wobble;
+            const px = m.x + Math.cos(a2) * r;
+            const py = m.y + Math.sin(a2) * r;
+            particles.push({ x: px, y: py, vx: (Math.random() - 0.5) * 1.5, vy: (Math.random() - 0.5) * 1.5, life: 14, color: Math.random() > 0.3 ? "#38bdf8" : "#e0f2fe", size: 3 + Math.random() * 4 });
+          }
+          // Inner crackle sparks
           for (let k = 0; k < 3; k++) {
-            const a2 = ringAng + (k / 3) * Math.PI * 2;
-            const px = m.x + Math.cos(a2) * (thunderRadius * 0.6 + Math.sin(frame * 0.1 + k) * 20);
-            const py = m.y + Math.sin(a2) * (thunderRadius * 0.6 + Math.sin(frame * 0.1 + k) * 20);
-            particles.push({ x: px, y: py, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, life: 12, color: Math.random() > 0.4 ? "#38bdf8" : "#ffffff", size: 2 + Math.random() * 3 });
+            const a2 = Math.random() * Math.PI * 2;
+            const r2 = Math.random() * thunderRadius * 0.4;
+            particles.push({ x: m.x + Math.cos(a2) * r2, y: m.y + Math.sin(a2) * r2, vx: Math.cos(a2) * (2 + Math.random() * 3), vy: Math.sin(a2) * (2 + Math.random() * 3), life: 8 + Math.random() * 6, color: "#ffffff", size: 1.5 + Math.random() * 2 });
           }
         }
-        // Expanding ring visual every 20 frames
-        if (m.ultBuffTimer % 20 === 0) {
-          rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: thunderRadius, life: 16, maxLife: 16, color: "#38bdf8", lineWidth: 2.5 });
+        // ── Zigzag lightning arcs every 8 frames ──
+        if (m.ultBuffTimer % 8 === 0) {
+          const arcCount = 3;
+          for (let k = 0; k < arcCount; k++) {
+            const a2 = Math.random() * Math.PI * 2;
+            const dist = thunderRadius * (0.3 + Math.random() * 0.7);
+            // Create chain of particles forming a lightning bolt shape
+            const segments = 4 + Math.floor(Math.random() * 3);
+            for (let s = 0; s < segments; s++) {
+              const t = s / segments;
+              const jitter = (1 - t) * 12;
+              const px = m.x + Math.cos(a2) * dist * t + (Math.random() - 0.5) * jitter;
+              const py = m.y + Math.sin(a2) * dist * t + (Math.random() - 0.5) * jitter;
+              particles.push({ x: px, y: py, vx: Math.cos(a2) * 1, vy: Math.sin(a2) * 1, life: 10 + Math.random() * 5, color: Math.random() > 0.5 ? "#38bdf8" : "#ffffff", size: 2.5 + Math.random() * 3 });
+            }
+          }
+        }
+        // ── Expanding ring pulse every 15 frames ──
+        if (m.ultBuffTimer % 15 === 0) {
+          rings.push({ x: m.x, y: m.y, radius: m.baseRadius * 0.8, maxRadius: thunderRadius, life: 18, maxLife: 18, color: "#38bdf8", lineWidth: 3 });
+          // Secondary thinner ring slightly delayed
+          rings.push({ x: m.x, y: m.y, radius: m.baseRadius * 0.5, maxRadius: thunderRadius * 0.7, life: 14, maxLife: 14, color: "#7dd3fc", lineWidth: 1.5 });
+        }
+        // ── Continuous glow ring (constant visual presence) every 3 frames ──
+        if (m.ultBuffTimer % 3 === 0) {
+          rings.push({ x: m.x, y: m.y, radius: thunderRadius * 0.85, maxRadius: thunderRadius, life: 5, maxLife: 5, color: "rgba(56,189,248,0.35)", lineWidth: 2 });
         }
         // Damage tick every 30 frames (~0.5s)
         if (m.ultBuffTimer % 30 === 0) {
@@ -640,11 +710,74 @@ function physicsStep(
             if (dx * dx + dy * dy < thunderRadius * thunderRadius) {
               const dmg = Math.round(m.fighter.stats.atk * 0.8);
               o.hp -= dmg;
-              o.flashTimer = 8;
-              texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#38bdf8", life: 30, size: 14 });
-              // Small lightning bolt particles
-              for (let k = 0; k < 4; k++) { particles.push({ x: o.x + (Math.random() - 0.5) * 10, y: o.y - k * 8, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random(), life: 12, color: "#38bdf8", size: 2 + Math.random() * 2 }); }
+              o.flashTimer = 10;
+              texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#38bdf8", life: 30, size: 16 });
+              // Lightning strike from caster to target
+              const sDx = o.x - m.x, sDy = o.y - m.y;
+              const sDist = Math.sqrt(sDx * sDx + sDy * sDy) || 1;
+              const sNx = sDx / sDist, sNy = sDy / sDist;
+              for (let k = 0; k < 8; k++) {
+                const t = k / 8;
+                const jx = (Math.random() - 0.5) * 18;
+                const jy = (Math.random() - 0.5) * 18;
+                particles.push({ x: m.x + sNx * sDist * t + jx, y: m.y + sNy * sDist * t + jy, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, life: 14, color: Math.random() > 0.4 ? "#38bdf8" : "#ffffff", size: 3 + Math.random() * 3 });
+              }
+              // Impact burst on target
+              for (let k = 0; k < 6; k++) { const ang = Math.random() * Math.PI * 2; particles.push({ x: o.x, y: o.y, vx: Math.cos(ang) * 4, vy: Math.sin(ang) * 4, life: 15, color: "#38bdf8", size: 3 + Math.random() * 3 }); }
+              rings.push({ x: o.x, y: o.y, radius: 5, maxRadius: o.baseRadius * 2.5, life: 14, maxLife: 14, color: "#38bdf8", lineWidth: 3 });
             }
+          }
+        }
+        // Mild shake to feel the electricity (reduced from normal shake)
+        if (m.ultBuffTimer % 10 === 0) {
+          shake.value = Math.max(shake.value, 2);
+        }
+      }
+
+      // ── Frost Field: sustained freeze aura tick ──
+      const hasFrost = m.fighter.skills.some(s => s.id === "frost-field");
+      if (hasFrost && m.alive) {
+        const frostRadius = 180;
+        // Re-apply freeze to anyone who enters range
+        if (m.ultBuffTimer % 30 === 0) {
+          for (const o of alive) {
+            if (o === m || o.isClone) continue;
+            const dx = o.x - m.x, dy = o.y - m.y;
+            if (dx * dx + dy * dy < frostRadius * frostRadius) {
+              o.freezeTimer = Math.max(o.freezeTimer, 90);
+              o.slowTimer = Math.max(o.slowTimer, 90);
+              const dmg = Math.round(m.fighter.stats.atk * 0.5);
+              o.hp -= dmg;
+              o.flashTimer = 6;
+              texts.push({ x: o.x, y: o.y - o.baseRadius - 10, text: `-${dmg}`, color: "#22d3ee", life: 25, size: 13 });
+              // Ice shard particles on hit
+              for (let k = 0; k < 4; k++) {
+                const a2 = Math.random() * Math.PI * 2;
+                particles.push({ x: o.x, y: o.y, vx: Math.cos(a2) * 2, vy: Math.sin(a2) * 2 - 1, life: 18, color: Math.random() > 0.5 ? "#67e8f9" : "#ffffff", size: 2 + Math.random() * 3 });
+              }
+            }
+          }
+        }
+        // Frost particles swirling around caster
+        if (m.ultBuffTimer % 3 === 0) {
+          const orbCount = 4;
+          const baseAng = (frame * 0.12) % (Math.PI * 2);
+          for (let k = 0; k < orbCount; k++) {
+            const a2 = baseAng + (k / orbCount) * Math.PI * 2;
+            const r = frostRadius * 0.5 + Math.sin(frame * 0.08 + k * 2) * 20;
+            particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r, vx: 0, vy: -0.5, life: 16, color: Math.random() > 0.3 ? "#67e8f9" : "#cffafe", size: 2 + Math.random() * 3 });
+          }
+        }
+        // Frost ring pulse
+        if (m.ultBuffTimer % 18 === 0) {
+          rings.push({ x: m.x, y: m.y, radius: m.baseRadius, maxRadius: frostRadius, life: 16, maxLife: 16, color: "#22d3ee", lineWidth: 2 });
+        }
+        // Falling snowflakes
+        if (m.ultBuffTimer % 8 === 0) {
+          for (let k = 0; k < 3; k++) {
+            const a2 = Math.random() * Math.PI * 2;
+            const r = Math.random() * frostRadius;
+            particles.push({ x: m.x + Math.cos(a2) * r, y: m.y + Math.sin(a2) * r - 20, vx: (Math.random() - 0.5) * 0.5, vy: 0.5 + Math.random() * 0.5, life: 30, color: "#e0f2fe", size: 2 + Math.random() * 2, char: Math.random() > 0.5 ? "❄" : undefined });
           }
         }
       }
@@ -815,7 +948,8 @@ function physicsStep(
     if (mHas("aura-of-speed")) maxSpd *= 1.3;
     if (mHas("adrenaline") && m.skillBuff > 0) maxSpd *= 1.5;
     if (m.ultBuffTimer > 0 && m.fighter.skills.some(s => s.id === "rage-burst")) maxSpd *= 2;
-    if (m.slowTimer > 0) maxSpd *= 0.6;
+    if (m.freezeTimer > 0) maxSpd *= 0.12;       // deep freeze: nearly immobile
+    else if (m.slowTimer > 0) maxSpd *= 0.6;
     const rageSpd = m.rageMode ? maxSpd * 1.3 : maxSpd;
     const curSpd = Math.sqrt(m.vx * m.vx + m.vy * m.vy);
     if (curSpd > rageSpd) { const s = rageSpd / curSpd; m.vx *= s; m.vy *= s; }
@@ -841,6 +975,8 @@ function physicsStep(
     }
 
     if (m.flashTimer > 0) m.flashTimer--;
+    if (m.phaseTimer > 0) m.phaseTimer--;
+    if (m.freezeTimer > 0) m.freezeTimer--;
   }
 
   // Collisions
@@ -848,6 +984,8 @@ function physicsStep(
     for (let j = i + 1; j < alive.length; j++) {
       const a = alive[i], b = alive[j];
       if (!a.alive || !b.alive) continue;
+      // Skip collision if either marble is phasing (flash-slash dash)
+      if (a.phaseTimer > 0 || b.phaseTimer > 0) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const minDist = a.radius + b.radius;
@@ -1220,6 +1358,82 @@ function physicsStep(
   }
 }
 
+/* ─── FX helpers ─── */
+function drawLightningBolt(
+  ctx: CanvasRenderingContext2D,
+  x1: number, y1: number, x2: number, y2: number,
+  color: string, width: number, segments: number = 6, jitter: number = 18
+) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  const nx = dx / dist, ny = dy / dist;
+  // perpendicular
+  const px = -ny, py = nx;
+  const points: { x: number; y: number }[] = [{ x: x1, y: y1 }];
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments;
+    const mx = x1 + dx * t;
+    const my = y1 + dy * t;
+    const offset = (Math.random() - 0.5) * jitter * 2;
+    points.push({ x: mx + px * offset, y: my + py * offset });
+  }
+  points.push({ x: x2, y: y2 });
+  // Wide glow layer
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = 0.35;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * 4;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.stroke();
+  ctx.restore();
+  // Color core
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.stroke();
+  ctx.restore();
+  // White-hot center
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = 0.8;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, width * 0.35);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.stroke();
+  ctx.restore();
+  // Branch off (small fork near midpoint)
+  if (segments >= 4 && jitter > 10) {
+    const bi = Math.floor(segments * 0.4) + Math.floor(Math.random() * 2);
+    if (bi < points.length) {
+      const bp = points[bi];
+      const forkAng = Math.atan2(dy, dx) + (Math.random() - 0.5) * 1.2;
+      const forkLen = dist * (0.2 + Math.random() * 0.15);
+      const fx = bp.x + Math.cos(forkAng) * forkLen;
+      const fy = bp.y + Math.sin(forkAng) * forkLen;
+      drawLightningBolt(ctx, bp.x, bp.y, fx, fy, color, width * 0.5, 3, jitter * 0.5);
+    }
+  }
+}
+
 /* ─── Canvas draw ─── */
 function drawFrame(
   ctx: CanvasRenderingContext2D,
@@ -1255,8 +1469,9 @@ function drawFrame(
   ctx.translate(-camX, -camY);
 
   if (shake > 0.3) {
-    const sx = (Math.random() - 0.5) * shake * 2.5;
-    const sy = (Math.random() - 0.5) * shake * 2.5;
+    // Divide by zoom so shake amplitude stays constant regardless of zoom level
+    const sx = (Math.random() - 0.5) * shake * 2.5 / zoom;
+    const sy = (Math.random() - 0.5) * shake * 2.5 / zoom;
     ctx.translate(sx, sy);
   }
 
@@ -1275,16 +1490,41 @@ function drawFrame(
 
   const alive = marbles.filter(m => m.alive);
 
+  // ── Ring FX: glow + gradient fade ──
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
   for (const r of rings) {
     const progress = 1 - r.life / r.maxLife;
     const currentR = r.radius + (r.maxRadius - r.radius) * progress;
+    const fadeAlpha = (1 - progress) * 0.6;
+    const lw = r.lineWidth * (1 - progress * 0.5);
+    // Outer glow layer (wide, soft)
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha * 0.35;
+    ctx.shadowColor = r.color;
+    ctx.shadowBlur = 18;
     ctx.beginPath();
     ctx.arc(r.x, r.y, currentR, 0, Math.PI * 2);
     ctx.strokeStyle = r.color;
-    ctx.globalAlpha = (1 - progress) * 0.55;
-    ctx.lineWidth = r.lineWidth * (1 - progress * 0.6);
+    ctx.lineWidth = lw * 3;
+    ctx.stroke();
+    ctx.restore();
+    // Core ring (sharp, bright)
+    ctx.globalAlpha = fadeAlpha;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, currentR, 0, Math.PI * 2);
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+    // Inner white highlight
+    ctx.globalAlpha = fadeAlpha * 0.4;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, currentR, 0, Math.PI * 2);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = Math.max(0.5, lw * 0.3);
     ctx.stroke();
   }
+  ctx.restore();
   ctx.globalAlpha = 1;
 
   for (const m of alive) {
@@ -1329,19 +1569,45 @@ function drawFrame(
     ctx.globalAlpha = 1;
   }
 
+  // ── Trail FX: gradient ribbons with glow ──
   for (const m of alive) {
     if (m.trail.length >= 2) {
-      for (let i = 0; i < m.trail.length; i++) {
-        const t = m.trail[i];
-        const alpha = ((i + 1) / m.trail.length) * 0.18;
-        const sz = m.radius * ((i + 1) / m.trail.length) * 0.55;
-        ctx.beginPath();
-        ctx.arc(t.x, t.y, sz, 0, Math.PI * 2);
-        ctx.fillStyle = m.color;
-        ctx.globalAlpha = alpha;
-        ctx.fill();
+      // Draw connected gradient trail
+      const spd = Math.sqrt(m.vx * m.vx + m.vy * m.vy);
+      const spdAlpha = Math.min(1, spd / 4); // Only show trail when moving
+      if (spdAlpha > 0.05) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 1; i < m.trail.length; i++) {
+          const t0 = m.trail[i - 1];
+          const t1 = m.trail[i];
+          const frac = (i + 1) / m.trail.length;
+          const alpha = frac * 0.22 * spdAlpha;
+          const sz = m.radius * frac * 0.5;
+          // Gradient orb at trail point
+          const grad = ctx.createRadialGradient(t1.x, t1.y, 0, t1.x, t1.y, sz);
+          grad.addColorStop(0, m.color);
+          grad.addColorStop(0.6, m.color + "80");
+          grad.addColorStop(1, "transparent");
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          ctx.arc(t1.x, t1.y, sz, 0, Math.PI * 2);
+          ctx.fillStyle = grad;
+          ctx.fill();
+          // Connecting line segment
+          if (i > 0) {
+            ctx.globalAlpha = alpha * 0.6;
+            ctx.beginPath();
+            ctx.moveTo(t0.x, t0.y);
+            ctx.lineTo(t1.x, t1.y);
+            ctx.strokeStyle = m.color;
+            ctx.lineWidth = sz * 0.5;
+            ctx.lineCap = "round";
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
       }
-      ctx.globalAlpha = 1;
     }
   }
 
@@ -1357,6 +1623,66 @@ function drawFrame(
       ctx.strokeStyle = `rgba(239, 68, 68, ${a1})`;
       ctx.lineWidth = 3;
       ctx.stroke();
+    }
+
+    // ── Frost Field aura glow ──
+    if (m.ultBuffTimer > 0 && m.fighter.skills.some(s => s.id === "frost-field")) {
+      const fPulse = 0.4 + Math.sin(frame * 0.1) * 0.2;
+      const fAuraR = displayR + 22 + Math.sin(frame * 0.08) * 5;
+      ctx.save();
+      ctx.globalAlpha = fPulse * 0.5;
+      ctx.shadowColor = "#22d3ee";
+      ctx.shadowBlur = 25;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, fAuraR, 0, Math.PI * 2);
+      ctx.strokeStyle = "#67e8f9";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.globalAlpha = fPulse * 0.25;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#cffafe";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── Thunder Storm aura glow + lightning arcs ──
+    if (m.ultBuffTimer > 0 && m.fighter.skills.some(s => s.id === "thunder-storm")) {
+      const tPulse = 0.5 + Math.sin(frame * 0.18) * 0.3;
+      const auraR = displayR + 22 + Math.sin(frame * 0.12) * 6;
+      // Outer electric glow ring
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = tPulse * 0.5;
+      ctx.shadowColor = "#38bdf8";
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, auraR, 0, Math.PI * 2);
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      // Inner bright ring
+      ctx.globalAlpha = tPulse * 0.3;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "#e0f2fe";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+      // Actual zigzag lightning arcs radiating out (2-3 random arcs)
+      if (frame % 3 === 0) {
+        const arcCount = 2 + Math.floor(Math.random() * 2);
+        for (let la = 0; la < arcCount; la++) {
+          const ang = Math.random() * Math.PI * 2;
+          const len = auraR * (0.6 + Math.random() * 0.5);
+          drawLightningBolt(
+            ctx, m.x, m.y,
+            m.x + Math.cos(ang) * len, m.y + Math.sin(ang) * len,
+            "#38bdf8", 2, 5, 15
+          );
+        }
+      }
     }
 
     ctx.save();
@@ -1404,15 +1730,68 @@ function drawFrame(
       ctx.restore();
     }
 
-    ctx.save();
-    ctx.shadowColor = flash ? "#fca5a5" : m.color;
-    ctx.shadowBlur = flash ? 16 : 10;
-    ctx.beginPath();
-    ctx.arc(m.x, m.y, displayR, 0, Math.PI * 2);
-    ctx.strokeStyle = flash ? "#fca5a5" : m.color;
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-    ctx.restore();
+    // ── Freeze overlay: blue tint when frozen ──
+    if (m.freezeTimer > 0) {
+      const fAlpha = Math.min(0.55, m.freezeTimer / 120);
+      ctx.save();
+      ctx.globalAlpha = fAlpha;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR, 0, Math.PI * 2);
+      ctx.fillStyle = "#0ea5e9";
+      ctx.fill();
+      ctx.restore();
+      // Ice crystal shimmer
+      if (frame % 6 === 0) {
+        const iceAng = Math.random() * Math.PI * 2;
+        const iceR = displayR * (0.5 + Math.random() * 0.5);
+        ctx.save();
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = "#e0f2fe";
+        ctx.font = `${Math.max(6, Math.round(displayR * 0.3))}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("❄", m.x + Math.cos(iceAng) * iceR, m.y + Math.sin(iceAng) * iceR);
+        ctx.restore();
+      }
+    }
+
+    // ── Marble border: multi-layer glow ──
+    {
+      const borderCol = flash ? "#fca5a5" : (m.freezeTimer > 0 ? "#22d3ee" : m.color);
+      // Layer 1: Wide outer glow (soft bloom)
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = flash ? 0.5 : 0.2;
+      ctx.shadowColor = borderCol;
+      ctx.shadowBlur = flash ? 30 : 15;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR + 2, 0, Math.PI * 2);
+      ctx.strokeStyle = borderCol;
+      ctx.lineWidth = flash ? 8 : 5;
+      ctx.stroke();
+      ctx.restore();
+      // Layer 2: Core border
+      ctx.save();
+      ctx.shadowColor = borderCol;
+      ctx.shadowBlur = flash ? 20 : 8;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, displayR, 0, Math.PI * 2);
+      ctx.strokeStyle = borderCol;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+      // Flash hit: white burst overlay
+      if (flash) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = Math.min(0.5, m.flashTimer / 10);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, displayR + 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.restore();
+      }
+    }
 
     // ── Element glow ring ──
     if (m.fighter.element !== "neutral") {
@@ -1564,94 +1943,156 @@ function drawFrame(
     // (Skill indicators removed — R gauge bar + floating text for Q/W/E are enough)
   }
 
-  // ── Render projectiles (missiles / bullets) ──
+  // ── Render projectiles (missiles / bullets) with glow ──
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
   for (const pj of projectiles) {
     ctx.save();
     const pAlpha = Math.min(1, pj.life / 20);
     ctx.globalAlpha = pAlpha;
-    ctx.shadowColor = pj.color;
-    ctx.shadowBlur = pj.type === "bullet" ? 6 : 12;
     const ang = Math.atan2(pj.vy, pj.vx);
     ctx.translate(pj.x, pj.y);
     ctx.rotate(ang);
     if (pj.type === "bullet") {
-      // Bullet: small elongated tracer
-      ctx.fillStyle = pj.color;
+      // Bullet: elongated tracer with gradient glow
+      const bLen = pj.size * 2.5;
+      const bW = pj.size * 0.6;
+      // Outer glow
+      ctx.shadowColor = pj.color;
+      ctx.shadowBlur = 10;
+      const bGrad = ctx.createLinearGradient(-bLen, 0, bLen, 0);
+      bGrad.addColorStop(0, "transparent");
+      bGrad.addColorStop(0.3, pj.color + "66");
+      bGrad.addColorStop(0.6, pj.color);
+      bGrad.addColorStop(1, "#ffffff");
+      ctx.fillStyle = bGrad;
       ctx.beginPath();
-      ctx.ellipse(0, 0, pj.size * 1.8, pj.size * 0.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, bLen, bW, 0, 0, Math.PI * 2);
       ctx.fill();
+      // White-hot tip
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.ellipse(pj.size * 0.5, 0, pj.size * 0.8, pj.size * 0.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(pj.size * 0.8, 0, pj.size * 0.6, pj.size * 0.25, 0, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      // Missile body
+      // Missile: body with exhaust trail gradient
+      ctx.shadowColor = pj.color;
+      ctx.shadowBlur = 16;
+      // Exhaust glow behind
+      const exGrad = ctx.createLinearGradient(-pj.size * 2.5, 0, pj.size, 0);
+      exGrad.addColorStop(0, "transparent");
+      exGrad.addColorStop(0.4, pj.color + "44");
+      exGrad.addColorStop(0.8, pj.color);
+      exGrad.addColorStop(1, "#ffffff");
+      ctx.fillStyle = exGrad;
+      ctx.beginPath();
+      ctx.ellipse(-pj.size * 0.5, 0, pj.size * 2, pj.size * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Core body
       ctx.fillStyle = pj.color;
       ctx.beginPath();
       ctx.ellipse(0, 0, pj.size, pj.size * 0.5, 0, 0, Math.PI * 2);
       ctx.fill();
+      // White nose
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(pj.size * 0.3, 0, pj.size * 0.25, 0, Math.PI * 2);
+      ctx.arc(pj.size * 0.4, 0, pj.size * 0.3, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
   }
+  ctx.restore();
 
-  // ── Render slash lines ──
+  // ── Render slash lines: multi-layer glow + additive bloom ──
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
   for (const sl of slashLines) {
     const progress = 1 - sl.life / sl.maxLife; // 0→1
     const drawPct = Math.min(1, progress * 3);  // line draws in first 1/3
     const fadeAlpha = sl.life < sl.maxLife * 0.4 ? sl.life / (sl.maxLife * 0.4) : 1;
     const cx = sl.x1 + (sl.x2 - sl.x1) * drawPct;
     const cy = sl.y1 + (sl.y2 - sl.y1) * drawPct;
-    ctx.save();
-    ctx.globalAlpha = fadeAlpha;
-    // Outer glow
-    ctx.shadowColor = sl.color;
-    ctx.shadowBlur = 20;
-    ctx.strokeStyle = sl.color;
-    ctx.lineWidth = sl.width;
     ctx.lineCap = "round";
+    // Layer 1: Wide soft glow (bloom halo)
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha * 0.25;
+    ctx.shadowColor = sl.color;
+    ctx.shadowBlur = 35;
+    ctx.strokeStyle = sl.color;
+    ctx.lineWidth = sl.width * 5;
     ctx.beginPath();
     ctx.moveTo(sl.x1, sl.y1);
     ctx.lineTo(cx, cy);
     ctx.stroke();
-    // White core
-    ctx.shadowBlur = 0;
+    ctx.restore();
+    // Layer 2: Medium color glow
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha * 0.6;
+    ctx.shadowColor = sl.color;
+    ctx.shadowBlur = 15;
+    ctx.strokeStyle = sl.color;
+    ctx.lineWidth = sl.width * 2;
+    ctx.beginPath();
+    ctx.moveTo(sl.x1, sl.y1);
+    ctx.lineTo(cx, cy);
+    ctx.stroke();
+    ctx.restore();
+    // Layer 3: Core bright line
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    ctx.strokeStyle = sl.color;
+    ctx.lineWidth = sl.width;
+    ctx.beginPath();
+    ctx.moveTo(sl.x1, sl.y1);
+    ctx.lineTo(cx, cy);
+    ctx.stroke();
+    ctx.restore();
+    // Layer 4: White-hot center
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha * 0.9;
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = Math.max(1, sl.width * 0.35);
+    ctx.lineWidth = Math.max(1.5, sl.width * 0.4);
     ctx.beginPath();
     ctx.moveTo(sl.x1, sl.y1);
     ctx.lineTo(cx, cy);
     ctx.stroke();
     ctx.restore();
   }
+  ctx.restore();
 
+  // ── Particle FX: radial gradient + additive blending ──
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
   for (const p of particles) {
     const alpha = Math.max(0, Math.min(1, p.life / 20));
     ctx.save();
     ctx.globalAlpha = alpha;
     if (p.char) {
+      ctx.globalCompositeOperation = "source-over"; // text uses normal blending
       const sz = Math.max(6, p.size * Math.min(1, p.life / 18));
       ctx.font = `bold ${Math.round(sz)}px system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
-      ctx.lineWidth = 2;
-      ctx.strokeText(p.char, p.x, p.y);
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 6;
       ctx.fillStyle = p.color;
       ctx.fillText(p.char, p.x, p.y);
     } else {
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 5;
+      const sz = Math.max(0.5, p.size * Math.min(1, p.life / 15));
+      // Radial gradient: bright center → color → transparent
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, sz * 1.8);
+      grad.addColorStop(0, "#ffffff");
+      grad.addColorStop(0.2, p.color);
+      grad.addColorStop(0.7, p.color + "88");
+      grad.addColorStop(1, "transparent");
       ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(0.5, p.size * Math.min(1, p.life / 15)), 0, Math.PI * 2);
-      ctx.fillStyle = p.color;
+      ctx.arc(p.x, p.y, sz * 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
       ctx.fill();
     }
     ctx.restore();
   }
+  ctx.restore();
 
   for (const ft of texts) {
     const alpha = Math.min(1, ft.life / 15);
@@ -1777,14 +2218,35 @@ function drawFrame(
     ctx.restore();
   }
 
-  // ── Slow-mo vignette effect ──
+  // ── Slow-mo vignette + cinematic bars ──
   if (camera.slowMo > 0) {
-    const vigAlpha = Math.min(0.35, camera.slowMo / 90 * 0.35);
-    const grad = ctx.createRadialGradient(W / 2, H / 2, W * 0.2, W / 2, H / 2, W * 0.7);
+    const vigT = Math.min(1, camera.slowMo / 60);
+    const vigAlpha = vigT * 0.4;
+    // Radial vignette
+    const grad = ctx.createRadialGradient(W / 2, H / 2, W * 0.15, W / 2, H / 2, W * 0.65);
     grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(0.7, `rgba(0,0,0,${vigAlpha * 0.5})`);
     grad.addColorStop(1, `rgba(0,0,0,${vigAlpha})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
+    // Cinematic letterbox bars (subtle)
+    const barH = Math.round(H * 0.035 * vigT);
+    if (barH > 1) {
+      ctx.fillStyle = `rgba(0,0,0,${vigT * 0.7})`;
+      ctx.fillRect(0, 0, W, barH);
+      ctx.fillRect(0, H - barH, W, barH);
+    }
+    // Subtle chromatic edge tint
+    ctx.save();
+    ctx.globalAlpha = vigT * 0.08;
+    ctx.globalCompositeOperation = "lighter";
+    const chromGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.3, W / 2, H / 2, W * 0.7);
+    chromGrad.addColorStop(0, "transparent");
+    chromGrad.addColorStop(0.8, "#1e3a5f");
+    chromGrad.addColorStop(1, "#0c1929");
+    ctx.fillStyle = chromGrad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   // ── CUT-IN: anime-style profile + skill name ──
