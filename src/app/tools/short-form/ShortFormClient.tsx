@@ -295,6 +295,8 @@ export default function ShortFormClient() {
   const [bgmTrack, setBgmTrack] = useState<BgmId>("none");
   const [bgmData, setBgmData] = useState<Uint8Array | null>(null);
   const [bgmLoadError, setBgmLoadError] = useState(false);
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bgmUrlRef = useRef<string>("");
 
   // ─── Watermark ───
   const [watermark, setWatermark] = useState("suile.im");
@@ -308,12 +310,15 @@ export default function ShortFormClient() {
   const [ytPhase, setYtPhase] = useState<"idle" | "auth" | "uploading" | "done" | "error">("idle");
   const [ytProgress, setYtProgress] = useState(0);
   const [ytVideoId, setYtVideoId] = useState("");
+  const [ytUploadStatus, setYtUploadStatus] = useState("");
   const [ytError, setYtError] = useState("");
   const [ytTitle, setYtTitle] = useState("");
   const [ytPrivacy, setYtPrivacy] = useState<PrivacyStatus>("private");
   const gisTokenClientRef = useRef<GisTokenClient | null>(null);
   const ytPendingRef = useRef(false);
   const exportBlobRef = useRef<Blob | null>(null);
+  // Ref to always call the latest doYoutubeUpload (avoids stale closure in GIS callback)
+  const doYoutubeUploadRef = useRef<(token: string, blob: Blob) => void>(() => {});
 
   // ─── Trim Range ───
   const [trimStart, setTrimStart] = useState(0);
@@ -548,6 +553,42 @@ export default function ShortFormClient() {
 
     return () => { cancelled = true; };
   }, [bgmTrack]);
+
+  // Create/destroy BGM preview audio element when bgmData changes
+  useEffect(() => {
+    // Cleanup previous
+    if (bgmAudioRef.current) {
+      bgmAudioRef.current.pause();
+      bgmAudioRef.current = null;
+    }
+    if (bgmUrlRef.current) {
+      URL.revokeObjectURL(bgmUrlRef.current);
+      bgmUrlRef.current = "";
+    }
+
+    if (!bgmData) return;
+
+    const blob = new Blob([new Uint8Array(bgmData)], { type: "audio/mpeg" });
+    const url = URL.createObjectURL(blob);
+    bgmUrlRef.current = url;
+
+    const audio = new Audio(url);
+    audio.loop = true;
+    audio.volume = 0.2;
+    bgmAudioRef.current = audio;
+
+    // If video is currently playing, start BGM too
+    const v = videoRef.current;
+    if (v && !v.paused) {
+      audio.currentTime = (v.currentTime % audio.duration) || 0;
+      audio.play().catch(() => {});
+    }
+
+    return () => {
+      audio.pause();
+      URL.revokeObjectURL(url);
+    };
+  }, [bgmData]);
 
   /* ════════════════════════════════════════════
      CANVAS RENDER LOOP (with live captions)
@@ -849,7 +890,10 @@ export default function ShortFormClient() {
       const v = videoRef.current;
       if (v) {
         setCurrentTime(v.currentTime);
-        if (v.currentTime >= trimEnd) { v.currentTime = trimStart; }
+        if (v.currentTime >= trimEnd) {
+          v.currentTime = trimStart;
+          if (bgmAudioRef.current) bgmAudioRef.current.currentTime = 0;
+        }
       }
       animRef.current = requestAnimationFrame(loop);
     };
@@ -873,9 +917,16 @@ export default function ShortFormClient() {
       playPromiseRef.current = v.play().catch((err) => {
         console.warn("[Play] Interrupted:", err.message);
       });
+      // Start BGM preview
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.currentTime = 0;
+        bgmAudioRef.current.play().catch(() => {});
+      }
       setPlaying(true);
     } else {
       v.pause();
+      // Pause BGM preview
+      if (bgmAudioRef.current) bgmAudioRef.current.pause();
       setPlaying(false);
       playPromiseRef.current = null;
     }
@@ -893,6 +944,11 @@ export default function ShortFormClient() {
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     v.currentTime = trimStart + ratio * (trimEnd - trimStart);
     setCurrentTime(v.currentTime);
+    // Sync BGM position
+    if (bgmAudioRef.current) {
+      const bgmDur = bgmAudioRef.current.duration || 30;
+      bgmAudioRef.current.currentTime = ((v.currentTime - trimStart) % bgmDur);
+    }
   }, [trimStart, trimEnd]);
 
   const onTimelineDown = useCallback(async (e: React.PointerEvent) => {
@@ -1356,6 +1412,8 @@ export default function ShortFormClient() {
      ════════════════════════════════════════════ */
   const handleExport = useCallback(async () => {
     if (!videoFile || !videoRef.current) return;
+    // Stop BGM preview during export
+    if (bgmAudioRef.current) bgmAudioRef.current.pause();
     setPhase("loading");
     setProgress(0);
     setError("");
@@ -1380,6 +1438,9 @@ export default function ShortFormClient() {
   }, [exportBlob]);
 
   const reset = useCallback(() => {
+    // Stop BGM preview
+    if (bgmAudioRef.current) { bgmAudioRef.current.pause(); bgmAudioRef.current = null; }
+    if (bgmUrlRef.current) { URL.revokeObjectURL(bgmUrlRef.current); bgmUrlRef.current = ""; }
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(null); setVideoUrl(""); setDuration(0);
     setPlaying(false); setCurrentTime(0); setTrimStart(0); setTrimEnd(0);
@@ -1420,16 +1481,18 @@ export default function ShortFormClient() {
       client_id: GOOGLE_CLIENT_ID,
       scope: YT_SCOPE,
       callback: (response: GisTokenResponse) => {
+        console.log("[YouTube] GIS callback fired, has token:", !!response.access_token, "error:", response.error);
         const blob = exportBlobRef.current;
         if (response.access_token && ytPendingRef.current && blob) {
           ytPendingRef.current = false;
-          doYoutubeUpload(response.access_token, blob);
+          console.log("[YouTube] Calling doYoutubeUpload via ref, blob size:", blob.size);
+          doYoutubeUploadRef.current(response.access_token, blob);
         } else if (response.access_token && !blob) {
-          // Auth succeeded but no blob — should not happen
           console.error("[YouTube] Auth OK but no export blob available");
           setYtPhase("error");
           setYtError("No video to upload. Please export first.");
         } else if (response.error) {
+          console.error("[YouTube] Auth error:", response.error);
           setYtPhase("error");
           setYtError(response.error);
         }
@@ -1460,14 +1523,24 @@ export default function ShortFormClient() {
       });
 
       console.log("[YouTube] Upload complete! Video ID:", result.videoId, "URL:", result.url);
+      console.log("[YouTube] Upload status:", result.uploadStatus, "Privacy:", result.privacyStatus, "Rejection:", result.rejectionReason);
       setYtVideoId(result.videoId);
-      setYtPhase("done");
+      setYtUploadStatus(result.uploadStatus || "uploaded");
+
+      if (result.uploadStatus === "rejected" || result.uploadStatus === "failed") {
+        setYtPhase("error");
+        setYtError(`YouTube rejected the video: ${result.rejectionReason || "unknown reason"}`);
+      } else {
+        setYtPhase("done");
+      }
     } catch (err) {
       console.error("[YouTube Upload] Error:", err);
       setYtPhase("error");
       setYtError(err instanceof Error ? err.message : "Upload failed");
     }
   }, [ytTitle, ytPrivacy]);
+  // Keep ref in sync so GIS callback always uses latest upload function
+  useEffect(() => { doYoutubeUploadRef.current = doYoutubeUpload; }, [doYoutubeUpload]);
 
   // Entry point: request OAuth then upload
   const handleYoutubeUpload = useCallback(() => {
@@ -1953,15 +2026,39 @@ export default function ShortFormClient() {
 
               {/* YouTube Direct Upload Section */}
               {ytPhase === "done" && ytVideoId ? (
-                <a
-                  href={`https://youtube.com/shorts/${ytVideoId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-red-600 to-red-500 text-white font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-red-500/20 hover:from-red-500 hover:to-red-400"
-                >
-                  <Check size={16} />
-                  {t.ytWatch}
-                </a>
+                <div className="w-full rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-green-300 dark:border-green-800 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-green-600 dark:text-green-400">
+                    <Check size={16} />
+                    {t.ytDone}
+                  </div>
+                  <a
+                    href={`https://youtube.com/shorts/${ytVideoId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-red-600 to-red-500 text-white font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-red-500/20 hover:from-red-500 hover:to-red-400"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.38.55A3.02 3.02 0 00.5 6.19 31.6 31.6 0 000 12a31.6 31.6 0 00.5 5.81 3.02 3.02 0 002.12 2.14c1.88.55 9.38.55 9.38.55s7.5 0 9.38-.55a3.02 3.02 0 002.12-2.14A31.6 31.6 0 0024 12a31.6 31.6 0 00-.5-5.81zM9.75 15.02V8.98L15.5 12l-5.75 3.02z"/></svg>
+                    {t.ytWatch}
+                  </a>
+                  <a
+                    href="https://studio.youtube.com/channel/UC/videos/shorts"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 rounded-xl bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold text-xs flex items-center justify-center gap-2 transition hover:bg-zinc-300 dark:hover:bg-zinc-700"
+                  >
+                    YouTube Studio에서 확인
+                  </a>
+                  {ytUploadStatus && (
+                    <p className="text-[10px] text-zinc-500 text-center font-mono">
+                      Status: {ytUploadStatus} | Video ID: {ytVideoId}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-zinc-400 text-center leading-relaxed">
+                    YouTube가 영상을 처리 중일 수 있습니다 (수 분 소요).<br/>
+                    <strong>YouTube Studio &gt; 콘텐츠</strong>에서 업로드 상태를 확인하세요.<br/>
+                    비공개(private) 영상은 Studio에서만 보입니다.
+                  </p>
+                </div>
               ) : ytPhase === "uploading" ? (
                 <div className="w-full rounded-2xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 space-y-2">
                   <div className="flex items-center gap-2 text-sm font-bold text-zinc-700 dark:text-zinc-300">

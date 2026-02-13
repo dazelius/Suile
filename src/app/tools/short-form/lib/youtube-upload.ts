@@ -22,6 +22,9 @@ export interface UploadParams {
 export interface UploadResult {
   videoId: string;
   url: string;
+  uploadStatus?: string;   // "uploaded" | "processed" | "rejected" | etc.
+  rejectionReason?: string;
+  privacyStatus?: string;
 }
 
 /**
@@ -91,6 +94,7 @@ export async function uploadToYouTube({
   const result = await new Promise<UploadResult>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", uploadUrl, true);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.setRequestHeader("Content-Type", blob.type || "video/mp4");
 
     xhr.upload.onprogress = (e) => {
@@ -138,6 +142,39 @@ export async function uploadToYouTube({
 
     xhr.send(blob);
   });
+
+  // ── Step 3: Verify the upload by checking video status ──
+  console.log("[YT-Upload] Step 3: Verifying upload status...");
+  try {
+    const checkRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=status,processingDetails&id=${result.videoId}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (checkRes.ok) {
+      const checkData = await checkRes.json();
+      console.log("[YT-Upload] Video status check:", JSON.stringify(checkData));
+      const item = checkData.items?.[0];
+      if (item) {
+        result.uploadStatus = item.status?.uploadStatus;
+        result.privacyStatus = item.status?.privacyStatus;
+        result.rejectionReason = item.status?.rejectionReason;
+        console.log("[YT-Upload] Upload status:", item.status?.uploadStatus);
+        console.log("[YT-Upload] Privacy:", item.status?.privacyStatus);
+        console.log("[YT-Upload] Processing:", item.processingDetails?.processingStatus);
+        if (item.status?.uploadStatus === "rejected") {
+          console.error("[YT-Upload] Video was REJECTED. Reason:", item.status?.rejectionReason);
+        }
+        if (item.status?.uploadStatus === "failed") {
+          console.error("[YT-Upload] Video FAILED. Reason:", item.status?.failureReason);
+          result.rejectionReason = item.status?.failureReason;
+        }
+      } else {
+        console.warn("[YT-Upload] Video not found in status check — may still be processing");
+      }
+    }
+  } catch (e) {
+    console.warn("[YT-Upload] Status check failed (non-critical):", e);
+  }
 
   return result;
 }
