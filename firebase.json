@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "suile-21173",
     "public": "out",
     "cleanUrls": true,
     "trailingSlash": false,
