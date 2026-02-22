@@ -99,6 +99,10 @@ export interface Translations {
   toolYoutuberBattleName: string;
   toolYoutuberBattleDesc: string;
 
+  // ── 근무표 ──
+  toolWorkScheduleName: string;
+  toolWorkScheduleDesc: string;
+
   // ── 연봉 실수령액 계산기 ──
   toolSalaryCalcName: string;
   toolSalaryCalcDesc: string;
@@ -283,6 +287,9 @@ const ko: Translations = {
   toolHeartRateName: "심박수 측정기",
   toolHeartRateDesc: "카메라에 손가락을 대면 심박수를 실시간 측정합니다",
 
+  toolWorkScheduleName: "근무표",
+  toolWorkScheduleDesc: "A·B·C 3개 조의 주간·야간·비번 교대 근무표. 공휴일·D-Day 지원",
+
   toolSalaryCalcName: "연봉 실수령액 계산기",
   toolSalaryCalcDesc: "2026년 확정 요율 기준 연봉 실수령액을 정확하게 계산합니다",
 
@@ -462,6 +469,9 @@ const en: Translations = {
 
   toolHeartRateName: "Heart Rate Monitor",
   toolHeartRateDesc: "Measure your heart rate with your phone camera using PPG technology",
+
+  toolWorkScheduleName: "Work Schedule",
+  toolWorkScheduleDesc: "3-team shift calendar (day/night/off) with holidays & D-Day",
 
   toolSalaryCalcName: "Salary Take-Home Calculator",
   toolSalaryCalcDesc: "Calculate your exact take-home pay based on 2026 Korean tax rates",
