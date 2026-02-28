@@ -339,9 +339,9 @@ function RotationModal({ modal, dark, getName, onClose }: {
 
 // ── 메인 컴포넌트 ────────────────────────────────────────────
 export default function WorkScheduleClient() {
-  const now = new Date();
-  const [year,         setYear]         = useState(now.getFullYear());
-  const [month,        setMonth]        = useState(now.getMonth());
+  // SSR 빌드 시점 날짜 고착 방지 — useEffect에서 클라이언트 실제 날짜로 보정
+  const [year,         setYear]         = useState(2026);
+  const [month,        setMonth]        = useState(0);
   const [team,         setTeam]         = useState<Team>("all");
   const [dark,         setDark]         = useState(false);
   const [names,        setNames]        = useState<Names>(DEFAULT_NAMES);
@@ -354,8 +354,12 @@ export default function WorkScheduleClient() {
   const [isIOSDevice,    setIsIOSDevice]    = useState(false);
   const [showIOSGuide,   setShowIOSGuide]   = useState(false);
 
-  // localStorage 복원
+  // 클라이언트 마운트 후 실제 현재 날짜 + localStorage 복원
   useEffect(() => {
+    const now = new Date();
+    setYear(now.getFullYear());
+    setMonth(now.getMonth());
+
     const savedTeam  = localStorage.getItem("ws-team") as Team | null;
     const savedDark  = localStorage.getItem("ws-dark") === "true";
     const savedNames = localStorage.getItem("ws-names");
