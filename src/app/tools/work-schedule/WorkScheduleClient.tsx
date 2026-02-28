@@ -339,7 +339,8 @@ function RotationModal({ modal, dark, getName, onClose }: {
 
 // ── 메인 컴포넌트 ────────────────────────────────────────────
 export default function WorkScheduleClient() {
-  // SSR 빌드 시점 날짜 고착 방지 — useEffect에서 클라이언트 실제 날짜로 보정
+  // mounted=false 동안은 SSR HTML을 렌더링하지 않아 서버 시각 고착을 완전히 차단
+  const [mounted,      setMounted]      = useState(false);
   const [year,         setYear]         = useState(2026);
   const [month,        setMonth]        = useState(0);
   const [team,         setTeam]         = useState<Team>("all");
@@ -354,11 +355,12 @@ export default function WorkScheduleClient() {
   const [isIOSDevice,    setIsIOSDevice]    = useState(false);
   const [showIOSGuide,   setShowIOSGuide]   = useState(false);
 
-  // 클라이언트 마운트 후 실제 현재 날짜 + localStorage 복원
+  // 클라이언트 마운트 시 핸드폰 실제 시각으로 연/월 초기화 + localStorage 복원
   useEffect(() => {
     const now = new Date();
     setYear(now.getFullYear());
     setMonth(now.getMonth());
+    setMounted(true);
 
     const savedTeam  = localStorage.getItem("ws-team") as Team | null;
     const savedDark  = localStorage.getItem("ws-dark") === "true";
@@ -484,6 +486,15 @@ export default function WorkScheduleClient() {
 
   // FAB 버튼 공통 클래스
   const fabCls = `fixed w-12 h-12 rounded-full shadow-lg border flex items-center justify-center ${t.card} active:opacity-70 z-10`;
+
+  // 클라이언트 마운트 전에는 렌더링 차단 — 서버 시각 고착 방지
+  if (!mounted) {
+    return (
+      <div className="flex flex-col h-[100dvh] items-center justify-center bg-white dark:bg-black">
+        <div className="w-8 h-8 border-4 border-gray-300 border-t-orange-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className={`flex flex-col h-[100dvh] ${t.bg} transition-colors duration-300`}>
